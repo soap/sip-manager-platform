@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Provisioning\Enums\OperationStatus;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
+use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Actions\ManageExtensions;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Http\Requests\StoreExtensionRequest;
@@ -22,7 +23,7 @@ use Inertia\Response;
 
 class ExtensionController extends Controller
 {
-    public function index(Request $request, Tenant $tenant, ManageExtensions $extensions): Response
+    public function index(Request $request, Tenant $tenant, ManageExtensions $extensions, ProvisioningHealth $health): Response
     {
         $assignment = $tenant->pbxAssignment()->with(['node', 'numberRange'])->first();
         $list = Extension::query()->orderBy('extension_number')->get();
@@ -47,6 +48,7 @@ class ExtensionController extends Controller
             'nextNumber' => $extensions->nextFreeNumber(),
             'statuses' => ExtensionStatus::options(),
             'canManage' => $request->user()->can('manageExtensions', $tenant),
+            'provisioningStalled' => $health->stalledFor($tenant->id),
         ]);
     }
 

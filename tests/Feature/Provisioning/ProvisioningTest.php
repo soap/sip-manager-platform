@@ -16,6 +16,7 @@ use App\Modules\Provisioning\Jobs\ApplyConfigRevision;
 use App\Modules\Provisioning\Models\ConfigRevision;
 use App\Modules\Provisioning\Models\OutboxMessage;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
+use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\SipCredential;
 use App\Modules\Tenancy\Enums\TenantRole;
@@ -389,6 +390,43 @@ it('shows the provisioning state of each extension', function () {
 
     $this->get(route('tenant.extensions.index', $tenant))
         ->assertInertia(fn (Assert $page) => $page->where('extensions.0.provisioning.status', 'applied'));
+});
+
+it('warns when a change has waited too long and tells which part is not running', function () {
+    [$tenant] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+
+    $this->get(route('tenant.extensions.index', $tenant))
+        ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled', null));
+
+    $this->travel(ProvisioningHealth::STALL_SECONDS + 1)->seconds();
+
+    $this->get(route('tenant.extensions.index', $tenant))
+        ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled.reason', 'relay'));
+
+    // relayed, but no worker took the job
+    Queue::fake();
+    $this->artisan('provisioning:relay');
+
+    $this->get(route('tenant.extensions.index', $tenant))
+        ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled.reason', 'worker'));
+});
+
+it('does not count retrying or finished operations, or other tenants, as stalled', function () {
+    $node = fakeNode();
+    [$tenant] = provisioningTenant();
+    $other = TenantPbxAssignment::factory()->prefix('21')->create();
+    DB::transaction(fn () => app(RequestProvisioning::class)->forNumber($other->pbx_node_id, $other->tenant_id, '21001', OperationType::Reapplied, Extension::MORPH, 1));
+
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $node->failWith = new QueryException('mariadb', 'delete', [], new PDOException('SQLSTATE[HY000] [2002] Connection refused'));
+    app(ApplyRevision::class)->handle(ConfigRevision::query()->where('target', 'number:20101')->value('id'));
+    OutboxMessage::query()->update(['dispatched_at' => now()]);
+
+    $this->travel(ProvisioningHealth::STALL_SECONDS + 1)->seconds();
+
+    $this->get(route('tenant.extensions.index', $tenant))
+        ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled', null));
 });
 
 it('returns the same operation for a repeated idempotency key', function () {

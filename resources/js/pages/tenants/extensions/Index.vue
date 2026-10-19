@@ -75,6 +75,7 @@ const props = defineProps<{
     nextNumber: string | null;
     statuses: { value: ExtensionStatus; label: string }[];
     canManage: boolean;
+    provisioningStalled: { reason: 'relay' | 'worker'; since: string } | null;
 }>();
 
 const page = usePage();
@@ -117,7 +118,7 @@ const inProgress = computed(() =>
 
 const { start, stop } = usePoll(
     3000,
-    { only: ['extensions'] },
+    { only: ['extensions', 'provisioningStalled'] },
     { autoStart: false },
 );
 
@@ -227,6 +228,36 @@ function remove(extension: Extension): void {
             title="Extensions"
             description="Internal numbers of this tenant. Each one is a SIP account on the tenant's PBX node; phones of this tenant can call each other."
         />
+
+        <Alert
+            v-if="provisioningStalled"
+            variant="destructive"
+            data-test="provisioning-stalled"
+        >
+            <AlertTitle>Changes are not reaching the PBX</AlertTitle>
+            <AlertDescription v-if="page.props.auth.user.is_platform_admin">
+                A change has waited since
+                {{ new Date(provisioningStalled.since).toLocaleTimeString() }}.
+                <template v-if="provisioningStalled.reason === 'relay'">
+                    The outbox is not being relayed: check that the scheduler
+                    runs (<code>php artisan schedule:work</code>, or cron with
+                    <code>schedule:run</code>).
+                </template>
+                <template v-else>
+                    Nothing works the provisioning queue: check that a worker
+                    runs with
+                    <code>php artisan queue:work --queue=provisioning</code>.
+                </template>
+                Locally, restart <code>composer run dev</code>. Until then, a
+                new SIP password shown here does not work on the phone yet.
+            </AlertDescription>
+            <AlertDescription v-else>
+                A change has waited since
+                {{ new Date(provisioningStalled.since).toLocaleTimeString() }}.
+                Phones keep their old settings until it is written, so a new SIP
+                password does not work yet. Tell your platform admin.
+            </AlertDescription>
+        </Alert>
 
         <Alert v-if="!assignment">
             <AlertTitle>No PBX node yet</AlertTitle>
