@@ -11,11 +11,13 @@ use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Carbon;
 
 /**
- * A tenant's internal number. The number lies in the tenant's block on its node and becomes the
- * SIP username there, so it is unique per tenant and per node.
+ * A tenant's internal number. The number is the tenant's prefix and three digits (e.g. 20101),
+ * registered in dial_numbers, and doubles as the SIP username of its phone on the node.
  *
  * @property int $id
  * @property string $tenant_id
@@ -23,24 +25,30 @@ use Illuminate\Support\Carbon;
  * @property string $extension_number
  * @property string $display_name
  * @property ExtensionStatus $status
+ * @property int $version
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['tenant_id', 'pbx_node_id', 'extension_number', 'display_name', 'status'])]
+#[Fillable(['tenant_id', 'pbx_node_id', 'extension_number', 'display_name', 'status', 'version'])]
 #[UseFactory(ExtensionFactory::class)]
 class Extension extends Model
 {
     /** @use HasFactory<ExtensionFactory> */
     use BelongsToTenant, HasFactory;
 
+    /** The morph name in dial_numbers and config_revisions (registered in AppServiceProvider). */
+    public const MORPH = 'extension';
+
     protected $attributes = [
         'status' => 'active',
+        'version' => 1,
     ];
 
     protected function casts(): array
     {
         return [
             'status' => ExtensionStatus::class,
+            'version' => 'integer',
         ];
     }
 
@@ -50,5 +58,26 @@ class Extension extends Model
     public function node(): BelongsTo
     {
         return $this->belongsTo(PbxNode::class, 'pbx_node_id');
+    }
+
+    /**
+     * @return HasOne<SipCredential, $this>
+     */
+    public function sipCredential(): HasOne
+    {
+        return $this->hasOne(SipCredential::class)->withoutGlobalScope(SipCredential::TENANT_SCOPE);
+    }
+
+    /**
+     * @return MorphOne<DialNumber, $this>
+     */
+    public function dialNumber(): MorphOne
+    {
+        return $this->morphOne(DialNumber::class, 'owner')->withoutGlobalScope(DialNumber::TENANT_SCOPE);
+    }
+
+    public function isActive(): bool
+    {
+        return $this->status === ExtensionStatus::Active;
     }
 }

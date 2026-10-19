@@ -9,4 +9,6 @@ Route::middleware(['auth', 'verified', SetTenantContext::class])->prefix('t/{ten
     Route::post('extensions', [ExtensionController::class, 'store'])->name('extensions.store');
     Route::patch('extensions/{extension}', [ExtensionController::class, 'update'])->whereNumber('extension')->name('extensions.update');
     Route::delete('extensions/{extension}', [ExtensionController::class, 'destroy'])->whereNumber('extension')->name('extensions.destroy');
+    Route::post('extensions/{extension}/rotate-credential', [ExtensionController::class, 'rotateCredential'])->whereNumber('extension')->middleware('throttle:10,1')->name('extensions.rotate-credential');
+    Route::post('extensions/{extension}/reapply', [ExtensionController::class, 'reapply'])->whereNumber('extension')->middleware('throttle:10,1')->name('extensions.reapply');
 });

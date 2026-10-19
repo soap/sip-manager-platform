@@ -16,6 +16,8 @@ return new class extends Migration
             $table->string('extension_number', 10);
             $table->string('display_name');
             $table->string('status')->default('active');
+            // optimistic lock: bumped on every change
+            $table->unsignedInteger('version')->default(1);
             $table->timestamps();
 
             $table->unique(['tenant_id', 'extension_number']);

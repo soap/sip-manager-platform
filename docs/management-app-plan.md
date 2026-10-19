@@ -65,6 +65,16 @@
 **D3 — realm ผูกกับ hostname ของ node** (`ha1 = md5(user:realm:pass)`) → manifest ต้องส่ง `sip_domain` และถ้า hostname เปลี่ยน ต้อง re-hash ทุก subscriber (ต้องมีรหัสผ่านเดิม — ดู D4)
 
 **D4 — เก็บ SIP password แบบไหน** ถ้าจะทำ Yealink auto-provisioning หรือ re-hash เมื่อ realm เปลี่ยน ต้องเก็บ password แบบเข้ารหัส (encrypted cast + key แยก) ถ้าไม่ทำ ให้เก็บแค่ ha1 และ "ไม่แสดงซ้ำ" ตาม §12
+**ตัดสินใจ (20 ต.ค. 2026): เก็บแบบเข้ารหัส** (`sip_credentials.secret`, encrypted cast ด้วย app key) — ha1 คำนวณตอน apply จาก `sip_domain` ปัจจุบันของ node จึงแก้ D3 ได้ด้วยการ apply ซ้ำ; UI แสดงรหัสผ่านครั้งเดียวตอนสร้าง/หมุน (flash) แล้วไม่ส่งออกอีก
+
+**D5 — Ring group และทะเบียนหมายเลข (ตกลง 20 ต.ค. 2026)**
+- ตาราง `dial_numbers` (tenant_id, pbx_node_id, number, owner morph; unique (pbx_node_id, number)) เป็นทะเบียนกลางของทุกปลายทางที่มีเบอร์ — extension ทำแล้ว; ring group, queue, IVR ในอนาคตลงทะเบียนที่นี่เพื่อไม่ให้ชนกัน
+- `ring_groups`: tenant_id, pbx_node_id, number (ใน prefix), name, strategy (`ring_all` / `sequential`), ring_seconds, failover (type + id: extension / ring group / voicemail / hangup), status, version
+- `ring_group_members`: ring_group_id, extension_id (tenant เดียวกัน), position; unique (ring_group_id, extension_id)
+- Compile: exten ของกลุ่มใน `managed` = GotoIf ตรวจ prefix ผู้โทร (D1) → `Dial(PJSIP/a@opensips&PJSIP/b@opensips,N)` (ring_all) หรือ Dial ทีละคน (sequential) → failover
+- กติกา: ลบ extension = เอาออกจากกลุ่มใน transaction เดียวกัน + recompile กลุ่ม; extension ที่ปิดถูกข้ามตอน compile; ไม่มีสมาชิก active = ไป failover ทันที
+- ข้อควรระวัง Phase 4: สายเข้าจาก DID ไม่ผ่านการตรวจ prefix ผู้โทร — ต้องมี context สำหรับสายเข้าแยก
+- **สถานะ:** ทำ `dial_numbers` แล้ว; ring group เป็นรอบถัดไป
 
 ---
 
@@ -265,7 +275,8 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 ## 11. ความเสี่ยงและคำถามที่ยังเปิด
 
 1. ~~D1 multi-tenant ต่อ node~~ — ตัดสินแล้ว: ช่วงหมายเลข 5 หลักต่อ tenant (18 ต.ค. 2026)
-2. D4 เก็บ SIP password แบบเข้ารหัสเพื่อ Yealink auto-provisioning หรือไม่
+2. ~~D4 เก็บ SIP password แบบเข้ารหัสเพื่อ Yealink auto-provisioning หรือไม่~~ — ตัดสินแล้ว: เข้ารหัส (20 ต.ค. 2026)
+7. สิทธิ์ของ extension ยังไม่กำหนด: โทรภายใน tenant ถึงกันได้ทุกเบอร์ (v1.1 §7 "อนุญาตเฉพาะ extension ที่มีสิทธิ์โทรถึงกัน" ยังไม่มีรูปแบบ), ค่าของ `outbound_policy`, limit ราย extension
 3. DB users `manager`/`asterisk_manager` เป็น `@'%'` และไม่ `REQUIRE SSL` — พึ่ง firewall + VPC; ควรจำกัด host เป็น private CIDR เมื่อย้าย VPC
 4. ARI เป็น HTTP — ใช้ได้เฉพาะใน VPC
 5. Management App deploy ที่ไหน (droplet แยก region เดียวกับ SIP node ตาม §5.1 รูปแบบ B) — ใช้ dployer/Ploi หรือ SIP Deployer สร้างให้?
@@ -305,5 +316,17 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - **ข้อสังเกตจากการทดสอบ lab:** ถ้าเชื่อมต่อจากเครื่องนอก VPC ต้องใส่เฉพาะ public IP ใน `management_app_cidrs` ของ server แล้ว reinstall ทั้ง OpenSIPS และ Asterisk (มี private CIDR ปน = SIP Deployer ส่ง private IP เป็น management address); reinstall ที่ fail ด้วย "database is locked" มาจาก SQLite ของ SIP Deployer (`journal_mode=delete`, `DEFERRED`) — เสนอ WAL + `IMMEDIATE` + `busy_timeout`
 - ยังไม่ทำ: `manifest_checksum` (ตอนนี้เขียนทับทุกรอบ sync), `role=primary` ใน assignments (MVP มีแค่ primary), status `detached` (ใช้ `removed_at` แทน)
 
-### ถัดไป: M3 — Infrastructure adapters
-`OpenSipsDbAdapter`, `AsteriskRealtimeAdapter`, `AmiClient` (action/response) บน `NodeConnections`; integration test กับ MariaDB/Asterisk ใน Docker
+### M3/M4 — โทรภายใน tenant (20 ต.ค. 2026, ยังไม่ commit)
+- **Telephony:** `dial_numbers` (D5), `sip_credentials` (D4: encrypted, 20 ตัวอักษร/ตัวเลข), `extensions.version` (optimistic lock; PATCH ส่ง `version`); สร้าง extension = extension + dial number + credential + provisioning ใน transaction เดียว; หน้า Extensions แสดงรหัสผ่าน SIP ครั้งเดียว, สถานะบน PBX (poll ทุก 3s ระหว่างทำงาน), ปุ่ม New password / Retry
+- **Infrastructure (M3 บางส่วน):** `OpenSipsDbAdapter` (replace/read `subscriber` ต่อ username), `Asterisk\RealtimeAdapter` (replace/read exten ใน context `managed`) — ยังไม่มี `AmiClient` และ integration test ใน Docker
+- **Provisioning (M4):** `config_revisions` (revision_number ต่อ node, target `number:<n>`, compiled ไม่มี ha1, checksum), `provisioning_operations` (ULID, idempotency_key unique ต่อ tenant, status รวม `superseded`), `outbox_messages`; `RequestProvisioning` (ต้องอยู่ใน transaction ของการเปลี่ยน desired state) → `provisioning:relay` ทุก 2 วินาที → job `ApplyConfigRevision` บน queue `provisioning` (`WithoutOverlapping` ต่อ node) → `ApplyRevision`: compile สถานะปัจจุบันของเบอร์ ณ ตอน apply (revision ที่มาไม่เรียงก็จบที่สถานะล่าสุด) → validate (node ไม่ถูกลบ, มี OpenSIPS + realtime) → เขียน Asterisk ก่อน OpenSIPS → read-back เทียบ checksum → `applied` / `retrying` (10s, 30s, 2m, 10m, 30m) / `failed`; revision เก่าที่มี revision ใหม่กว่าของเบอร์เดียวกัน = `superseded`
+- **Compile (§6.2):** extension active → `subscriber` (username, domain=sip_domain, ha1, ha1_sha256) + exten: `GotoIf(prefix ผู้โทร != PP → denied,1)`, `Dial(PJSIP/<n>@opensips,30)`, `Hangup()`; ปิด/tenant หรือ assignment suspended → ไม่มี subscriber + `Goto(denied,1)`; ลบ → ไม่มี rows; exten `denied` ร่วม = `Playback(ss-noservice)`, `Hangup(21)`; เปลี่ยนสถานะ assignment = provision ทุกเบอร์ของ tenant
+- **Error classes (§6.5):** retry: MariaDB 2002/2003/2006/2013/1205/1213, read-back mismatch, node ยังไม่มี credentials; fail ทันที: 1045 (`node_auth_failed` — ยังไม่ re-pull credentials อัตโนมัติ), validation/capability
+- `php artisan dev` รัน `queue:listen --queue=provisioning,default` และ `schedule:work` ด้วย
+- **ทดสอบบน node lab (20 ต.ค. 2026):** tenant Demo Company 1 prefix 20, extension 20101 และ 20102 → operation `applied` ใน attempt แรก, read-back ตรง; **โทรศัพท์จริง register และโทร 20101↔20102 ได้แล้ว** — ยังต้องทดสอบ: โทรข้าม tenant ถูกปฏิเสธ (สร้าง tenant prefix 21), ปิด extension แล้ว register/โทรเข้าไม่ได้
+- **บทเรียนจากการทดสอบ:** (1) ถ้า relay/worker ไม่รัน การหมุนรหัสค้างใน outbox แต่หน้าเว็บแสดงรหัสใหม่แล้ว → โทรศัพท์ใช้รหัสที่ node ยังไม่มี; (2) fail2ban (5 ครั้ง/10 นาที → แบน 1 ชม.) แบน IP ผู้ทดสอบเร็วมากเพราะ Yealink ส่ง REGISTER ซ้ำหลายครั้งต่อการลอง 1 ครั้ง; (3) รหัสผ่าน SIP ไม่ใช้ตัว `I l 1 O o 0` แล้ว (พิมพ์ลงโทรศัพท์ง่ายขึ้น)
+- 153 tests ผ่าน, Larastan/vue-tsc/lint/build ผ่าน
+- ยังไม่ทำ: voicemail (`voicemail_enabled`), AMI read-back (`dialplan show`), API v1 + Idempotency-Key, หน้า Operations, reconciliation (M6), ring group (D5), กดเลขสั้น 3 หลัก, ปิด `direct_dial` บน node (ทำใน SIP Deployer ก่อน M5)
+
+### ถัดไป
+ทดสอบด้วย Yealink 2 เครื่อง (P0) → ring group (D5) → voicemail → AmiClient + read-back ผ่าน AMI → API v1 (M5)

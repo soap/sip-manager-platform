@@ -7,6 +7,9 @@ use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Provisioning\Actions\RequestProvisioning;
+use App\Modules\Provisioning\Enums\OperationType;
+use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -20,7 +23,7 @@ use Illuminate\Validation\ValidationException;
  */
 class ManageAssignments
 {
-    public function __construct(private Audit $audit) {}
+    public function __construct(private Audit $audit, private RequestProvisioning $provisioning) {}
 
     public function assign(Tenant $tenant, PbxNode $node, string $prefix): TenantPbxAssignment
     {
@@ -67,6 +70,18 @@ class ManageAssignments
                 ['pbx_node_id' => $assignment->pbx_node_id, 'prefix' => $prefix],
             );
             $assignment->update(['status' => $status]);
+
+            // suspending or resuming takes every number of the tenant out of or back into service
+            if ($assignment->wasChanged('status')) {
+                $assignment->extensions()->get()->each(fn (Extension $extension): ProvisioningOperation => $this->provisioning->forNumber(
+                    $assignment->pbx_node_id,
+                    $assignment->tenant_id,
+                    $extension->extension_number,
+                    OperationType::AssignmentChanged,
+                    Extension::MORPH,
+                    $extension->id,
+                ));
+            }
         }));
 
         $this->audit->record('pbx.assignment_updated', $assignment, [

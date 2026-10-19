@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { Form, Head, router, setLayoutProps, usePage } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import {
+    Form,
+    Head,
+    router,
+    setLayoutProps,
+    usePage,
+    usePoll,
+} from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
 import ExtensionController from '@/actions/App/Modules/Telephony/Http/Controllers/ExtensionController';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
@@ -22,20 +29,47 @@ import { index } from '@/routes/tenant/extensions';
 
 type ExtensionStatus = 'active' | 'disabled';
 
+type ProvisioningStatus =
+    | 'pending'
+    | 'running'
+    | 'applied'
+    | 'retrying'
+    | 'failed'
+    | 'superseded';
+
 type Extension = {
     id: number;
     extension_number: string;
     display_name: string;
     status: ExtensionStatus;
+    version: number;
+    provisioning: {
+        status: ProvisioningStatus;
+        error_code: string | null;
+        error_message: string | null;
+        next_attempt_at: string | null;
+    } | null;
 };
 
-defineProps<{
+type SipServer = {
+    domain: string | null;
+    port: number;
+    transports: string[];
+};
+
+type SipCredential = SipServer & {
+    extension_number: string;
+    username: string;
+    password: string;
+};
+
+const props = defineProps<{
     assignment: {
         node: string;
-        sip_domain: string | null;
         prefix: string;
         numbers: string;
         status: 'active' | 'suspended';
+        server: SipServer;
     } | null;
     extensions: Extension[];
     nextNumber: string | null;
@@ -57,6 +91,57 @@ setLayoutProps({
     ],
 });
 
+/**
+ * The SIP password arrives once, as flash data, after creating or rotating; it is kept on screen
+ * until dismissed and never sent again.
+ */
+const revealed = ref<SipCredential | null>(null);
+
+watch(
+    () => (page.flash as { sipCredential?: SipCredential }).sipCredential,
+    (credential) => {
+        if (credential) {
+            revealed.value = credential;
+        }
+    },
+    { immediate: true },
+);
+
+const inProgress = computed(() =>
+    props.extensions.some((extension) =>
+        ['pending', 'running', 'retrying'].includes(
+            extension.provisioning?.status ?? '',
+        ),
+    ),
+);
+
+const { start, stop } = usePoll(
+    3000,
+    { only: ['extensions'] },
+    { autoStart: false },
+);
+
+watch(inProgress, (busy) => (busy ? start() : stop()), { immediate: true });
+
+const provisioningLabels: Record<ProvisioningStatus, string> = {
+    pending: 'Waiting',
+    running: 'Writing',
+    applied: 'On PBX',
+    retrying: 'Retrying',
+    failed: 'Failed',
+    superseded: 'Waiting',
+};
+
+function provisioningVariant(
+    status: ProvisioningStatus | undefined,
+): 'secondary' | 'outline' | 'destructive' {
+    if (status === 'applied') {
+        return 'secondary';
+    }
+
+    return status === 'failed' ? 'destructive' : 'outline';
+}
+
 function update(extension: Extension, changes: Partial<Extension>): void {
     router.visit(
         ExtensionController.update({
@@ -67,6 +152,7 @@ function update(extension: Extension, changes: Partial<Extension>): void {
             data: {
                 display_name: extension.display_name,
                 status: extension.status,
+                version: extension.version,
                 ...changes,
             },
             preserveScroll: true,
@@ -84,6 +170,34 @@ function rename(extension: Extension): void {
     if (name && name !== extension.display_name) {
         update(extension, { display_name: name });
     }
+}
+
+function rotate(extension: Extension): void {
+    if (
+        !confirm(
+            `Give ${extension.extension_number} a new SIP password? The phone stops registering until it gets the new one.`,
+        )
+    ) {
+        return;
+    }
+
+    router.visit(
+        ExtensionController.rotateCredential({
+            tenant: tenant.value.slug,
+            extension: extension.id,
+        }),
+        { preserveScroll: true },
+    );
+}
+
+function reapply(extension: Extension): void {
+    router.visit(
+        ExtensionController.reapply({
+            tenant: tenant.value.slug,
+            extension: extension.id,
+        }),
+        { preserveScroll: true },
+    );
 }
 
 function remove(extension: Extension): void {
@@ -111,14 +225,14 @@ function remove(extension: Extension): void {
     <div class="flex flex-1 flex-col gap-6 p-4">
         <Heading
             title="Extensions"
-            description="Internal numbers of this tenant. Each one becomes a SIP account on the tenant's PBX node."
+            description="Internal numbers of this tenant. Each one is a SIP account on the tenant's PBX node; phones of this tenant can call each other."
         />
 
         <Alert v-if="!assignment">
             <AlertTitle>No PBX node yet</AlertTitle>
             <AlertDescription>
                 A platform admin places this tenant on a node and gives it a
-                block of numbers before extensions can be created.
+                prefix before extensions can be created.
             </AlertDescription>
         </Alert>
 
@@ -133,16 +247,12 @@ function remove(extension: Extension): void {
                 }}</span></span
             >
             <span
-                >SIP domain
-                <span class="font-mono text-foreground">{{
-                    assignment.sip_domain
-                }}</span></span
-            >
-            <span
-                >Prefix
-                <span class="font-mono text-foreground">{{
-                    assignment.prefix
-                }}</span></span
+                >SIP server
+                <span class="font-mono text-foreground"
+                    >{{ assignment.server.domain }}:{{
+                        assignment.server.port
+                    }}</span
+                ></span
             >
             <span
                 >Numbers
@@ -156,6 +266,44 @@ function remove(extension: Extension): void {
                 >Suspended</Badge
             >
         </div>
+
+        <Card v-if="revealed" class="border-amber-500/60">
+            <CardHeader>
+                <CardTitle
+                    >SIP account of {{ revealed.extension_number }}</CardTitle
+                >
+                <CardDescription>
+                    Enter these in the phone now. The password is shown only
+                    this once; rotate it if it gets lost.
+                </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-4">
+                <dl
+                    class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]"
+                >
+                    <dt class="text-muted-foreground">
+                        SIP server / domain (realm)
+                    </dt>
+                    <dd class="font-mono">{{ revealed.domain }}</dd>
+                    <dt class="text-muted-foreground">Port / transport</dt>
+                    <dd class="font-mono">
+                        {{ revealed.port }} ·
+                        {{ revealed.transports.join(', ').toUpperCase() }}
+                    </dd>
+                    <dt class="text-muted-foreground">User name / auth user</dt>
+                    <dd class="font-mono">{{ revealed.username }}</dd>
+                    <dt class="text-muted-foreground">Password</dt>
+                    <dd class="font-mono select-all" data-test="sip-password">
+                        {{ revealed.password }}
+                    </dd>
+                </dl>
+                <div>
+                    <Button variant="outline" @click="revealed = null"
+                        >I have saved it</Button
+                    >
+                </div>
+            </CardContent>
+        </Card>
 
         <Card v-if="canManage && assignment">
             <CardHeader>
@@ -209,7 +357,9 @@ function remove(extension: Extension): void {
             </CardContent>
         </Card>
 
-        <InputError :message="errors.display_name ?? errors.status" />
+        <InputError
+            :message="errors.extension ?? errors.display_name ?? errors.status"
+        />
 
         <div class="overflow-x-auto rounded-xl border">
             <table class="w-full text-sm">
@@ -218,6 +368,7 @@ function remove(extension: Extension): void {
                         <th class="px-4 py-2 font-medium">Number</th>
                         <th class="px-4 py-2 font-medium">Name</th>
                         <th class="px-4 py-2 font-medium">Status</th>
+                        <th class="px-4 py-2 font-medium">PBX</th>
                         <th v-if="canManage" class="px-4 py-2" />
                     </tr>
                 </thead>
@@ -255,13 +406,62 @@ function remove(extension: Extension): void {
                                 >{{ extension.status }}</Badge
                             >
                         </td>
+                        <td class="px-4 py-2">
+                            <div class="flex items-center gap-2">
+                                <Badge
+                                    :variant="
+                                        provisioningVariant(
+                                            extension.provisioning?.status,
+                                        )
+                                    "
+                                    :title="
+                                        extension.provisioning?.error_message ??
+                                        undefined
+                                    "
+                                    >{{
+                                        extension.provisioning
+                                            ? provisioningLabels[
+                                                  extension.provisioning.status
+                                              ]
+                                            : 'Not written'
+                                    }}</Badge
+                                >
+                                <span
+                                    v-if="extension.provisioning?.error_code"
+                                    class="max-w-48 truncate text-xs text-muted-foreground"
+                                    :title="
+                                        extension.provisioning.error_message ??
+                                        undefined
+                                    "
+                                    >{{
+                                        extension.provisioning.error_code
+                                    }}</span
+                                >
+                            </div>
+                        </td>
                         <td v-if="canManage" class="px-4 py-2 text-right">
                             <div class="flex justify-end gap-2">
+                                <Button
+                                    v-if="
+                                        extension.provisioning?.status ===
+                                        'failed'
+                                    "
+                                    size="sm"
+                                    variant="outline"
+                                    @click="reapply(extension)"
+                                    >Retry</Button
+                                >
                                 <Button
                                     size="sm"
                                     variant="outline"
                                     @click="rename(extension)"
                                     >Rename</Button
+                                >
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    @click="rotate(extension)"
+                                    >New password</Button
                                 >
                                 <Button
                                     size="sm"
@@ -275,7 +475,7 @@ function remove(extension: Extension): void {
                     </tr>
                     <tr v-if="extensions.length === 0">
                         <td
-                            :colspan="canManage ? 4 : 3"
+                            :colspan="canManage ? 5 : 4"
                             class="px-4 py-6 text-center text-muted-foreground"
                         >
                             No extensions yet.

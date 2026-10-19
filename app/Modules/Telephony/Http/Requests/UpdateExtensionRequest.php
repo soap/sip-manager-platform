@@ -21,6 +21,7 @@ class UpdateExtensionRequest extends FormRequest
         return [
             'display_name' => ['required', 'string', 'max:100'],
             'status' => ['required', Rule::enum(ExtensionStatus::class)],
+            'version' => ['nullable', 'integer', 'min:1'],
         ];
     }
 }
