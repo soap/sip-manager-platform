@@ -4,8 +4,7 @@ namespace App\Modules\Telephony\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Nodes\Models\PbxNode;
-use App\Modules\Provisioning\Enums\OperationStatus;
-use App\Modules\Provisioning\Models\ProvisioningOperation;
+use App\Modules\Provisioning\LatestOperations;
 use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Actions\ManageExtensions;
 use App\Modules\Telephony\Enums\ExtensionStatus;
@@ -13,21 +12,19 @@ use App\Modules\Telephony\Http\Requests\StoreExtensionRequest;
 use App\Modules\Telephony\Http\Requests\UpdateExtensionRequest;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Tenancy\Models\Tenant;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ExtensionController extends Controller
 {
-    public function index(Request $request, Tenant $tenant, ManageExtensions $extensions, ProvisioningHealth $health): Response
+    public function index(Request $request, Tenant $tenant, ManageExtensions $extensions, ProvisioningHealth $health, LatestOperations $latest): Response
     {
         $assignment = $tenant->pbxAssignment()->with(['node', 'numberRange'])->first();
         $list = Extension::query()->orderBy('extension_number')->get();
-        $operations = $this->latestOperations($tenant, $list);
+        $operations = $latest->of($tenant->id, Extension::MORPH, $list->modelKeys());
 
         return Inertia::render('tenants/extensions/Index', [
             'assignment' => $assignment?->numberRange === null ? null : [
@@ -136,30 +133,5 @@ class ExtensionController extends Controller
             'port' => (int) ($node->services['opensips']['sip_port'] ?? 5060),
             'transports' => array_values($node->services['opensips']['transports'] ?? ['udp']),
         ];
-    }
-
-    /**
-     * The newest provisioning operation of each extension, keyed by extension id.
-     *
-     * @param  EloquentCollection<int, Extension>  $extensions
-     * @return Collection<int, array{status: value-of<OperationStatus>, error_code: string|null, error_message: string|null, next_attempt_at: string|null}>
-     */
-    private function latestOperations(Tenant $tenant, EloquentCollection $extensions): Collection
-    {
-        $extensionIds = $extensions->modelKeys();
-
-        return ProvisioningOperation::query()
-            ->where('tenant_id', $tenant->id)
-            ->where('aggregate_type', Extension::MORPH)
-            ->whereIn('aggregate_id', $extensionIds)
-            ->orderByDesc('id')
-            ->get()
-            ->unique('aggregate_id')
-            ->mapWithKeys(fn (ProvisioningOperation $operation): array => [$operation->aggregate_id => [
-                'status' => $operation->status->value,
-                'error_code' => $operation->error_code,
-                'error_message' => $operation->error_message,
-                'next_attempt_at' => $operation->next_attempt_at?->toIso8601String(),
-            ]]);
     }
 }

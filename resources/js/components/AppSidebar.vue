@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import {
     Building2,
     Phone,
+    PhoneForwarded,
     LayoutGrid,
     ScrollText,
     Server,
@@ -28,6 +29,7 @@ import { index as adminTenants } from '@/routes/admin/tenants';
 import { dashboard as tenantDashboard } from '@/routes/tenant';
 import { index as auditLog } from '@/routes/tenant/audit-log';
 import { index as extensions } from '@/routes/tenant/extensions';
+import { index as ringGroups } from '@/routes/tenant/ring-groups';
 import { index as members } from '@/routes/tenant/members';
 import type { NavItem } from '@/types';
 
@@ -69,6 +71,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
             title: 'Extensions',
             href: extensions({ tenant: tenant.slug }),
             icon: Phone,
+        },
+        {
+            title: 'Ring groups',
+            href: ringGroups({ tenant: tenant.slug }),
+            icon: PhoneForwarded,
         },
         ...(tenant.canManageMembers
             ? [

@@ -6,6 +6,7 @@ use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Tenancy\Models\Tenant;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -75,7 +76,7 @@ it('changes the prefix only while the tenant has no extensions', function () {
     Extension::factory()->on($assignment)->create(['extension_number' => '25001']);
 
     $this->patch(route('admin.assignments.update', $assignment), ['prefix' => '26', 'status' => 'active'])
-        ->assertSessionHasErrors(['prefix' => 'The prefix cannot change while the tenant has extensions.']);
+        ->assertSessionHasErrors(['prefix' => 'The prefix cannot change while the tenant has extensions or ring groups.']);
     $this->patch(route('admin.assignments.update', $assignment), ['prefix' => '25', 'status' => 'suspended'])
         ->assertSessionHasNoErrors();
 
@@ -89,6 +90,7 @@ it('takes a tenant off its node only without extensions', function () {
 
     $this->delete(route('admin.assignments.destroy', $assignment))->assertSessionHasErrors('assignment');
 
+    DialNumber::withoutTenantScope()->delete();
     $extension->deleteQuietly();
 
     $this->delete(route('admin.assignments.destroy', $assignment))->assertSessionHasNoErrors();

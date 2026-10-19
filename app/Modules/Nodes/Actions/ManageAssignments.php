@@ -10,7 +10,9 @@ use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Provisioning\Actions\RequestProvisioning;
 use App\Modules\Provisioning\Enums\OperationType;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
+use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -56,8 +58,8 @@ class ManageAssignments
         $range = $assignment->numberRange;
         $before = ['prefix' => $range?->prefix, 'status' => $assignment->status->value];
 
-        if ($range !== null && $range->prefix !== $prefix && $assignment->extensions()->exists()) {
-            throw ValidationException::withMessages(['prefix' => 'The prefix cannot change while the tenant has extensions.']);
+        if ($range !== null && $range->prefix !== $prefix && $this->usesNumbers($assignment)) {
+            throw ValidationException::withMessages(['prefix' => 'The prefix cannot change while the tenant has extensions or ring groups.']);
         }
 
         $this->guardPrefix(fn () => DB::transaction(function () use ($assignment, $range, $prefix, $status): void {
@@ -81,6 +83,15 @@ class ManageAssignments
                     Extension::MORPH,
                     $extension->id,
                 ));
+
+                RingGroup::withoutTenantScope()->where('tenant_id', $assignment->tenant_id)->get()->each(fn (RingGroup $group): ProvisioningOperation => $this->provisioning->forNumber(
+                    $assignment->pbx_node_id,
+                    $assignment->tenant_id,
+                    $group->number,
+                    OperationType::AssignmentChanged,
+                    RingGroup::MORPH,
+                    $group->id,
+                ));
             }
         }));
 
@@ -96,8 +107,8 @@ class ManageAssignments
      */
     public function unassign(TenantPbxAssignment $assignment): void
     {
-        if ($assignment->extensions()->exists()) {
-            throw ValidationException::withMessages(['assignment' => 'Delete the tenant\'s extensions before taking it off the node.']);
+        if ($this->usesNumbers($assignment)) {
+            throw ValidationException::withMessages(['assignment' => 'Delete the tenant\'s extensions and ring groups before taking it off the node.']);
         }
 
         $prefix = $assignment->numberRange?->prefix;
@@ -108,6 +119,14 @@ class ManageAssignments
         });
 
         $this->audit->record('pbx.unassigned', $assignment, ['node' => $assignment->node->name, 'prefix' => $prefix], $assignment->tenant);
+    }
+
+    /**
+     * Whether the tenant has any number on the node (extension, ring group, …).
+     */
+    private function usesNumbers(TenantPbxAssignment $assignment): bool
+    {
+        return DialNumber::withoutTenantScope()->where('tenant_id', $assignment->tenant_id)->exists();
     }
 
     private function ensureValidPrefix(string $prefix): void

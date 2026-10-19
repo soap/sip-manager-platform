@@ -12,6 +12,8 @@ import ExtensionController from '@/actions/App/Modules/Telephony/Http/Controller
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import ProvisioningBadge from '@/components/telephony/ProvisioningBadge.vue';
+import ProvisioningStalledAlert from '@/components/telephony/ProvisioningStalledAlert.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,16 +28,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { dashboard } from '@/routes/tenant';
 import { index } from '@/routes/tenant/extensions';
+import type { ProvisioningStall, ProvisioningState } from '@/types/telephony';
+import { isInProgress } from '@/types/telephony';
 
 type ExtensionStatus = 'active' | 'disabled';
-
-type ProvisioningStatus =
-    | 'pending'
-    | 'running'
-    | 'applied'
-    | 'retrying'
-    | 'failed'
-    | 'superseded';
 
 type Extension = {
     id: number;
@@ -43,12 +39,7 @@ type Extension = {
     display_name: string;
     status: ExtensionStatus;
     version: number;
-    provisioning: {
-        status: ProvisioningStatus;
-        error_code: string | null;
-        error_message: string | null;
-        next_attempt_at: string | null;
-    } | null;
+    provisioning: ProvisioningState | null;
 };
 
 type SipServer = {
@@ -75,7 +66,7 @@ const props = defineProps<{
     nextNumber: string | null;
     statuses: { value: ExtensionStatus; label: string }[];
     canManage: boolean;
-    provisioningStalled: { reason: 'relay' | 'worker'; since: string } | null;
+    provisioningStalled: ProvisioningStall | null;
 }>();
 
 const page = usePage();
@@ -109,11 +100,7 @@ watch(
 );
 
 const inProgress = computed(() =>
-    props.extensions.some((extension) =>
-        ['pending', 'running', 'retrying'].includes(
-            extension.provisioning?.status ?? '',
-        ),
-    ),
+    isInProgress(props.extensions.map((extension) => extension.provisioning)),
 );
 
 const { start, stop } = usePoll(
@@ -123,25 +110,6 @@ const { start, stop } = usePoll(
 );
 
 watch(inProgress, (busy) => (busy ? start() : stop()), { immediate: true });
-
-const provisioningLabels: Record<ProvisioningStatus, string> = {
-    pending: 'Waiting',
-    running: 'Writing',
-    applied: 'On PBX',
-    retrying: 'Retrying',
-    failed: 'Failed',
-    superseded: 'Waiting',
-};
-
-function provisioningVariant(
-    status: ProvisioningStatus | undefined,
-): 'secondary' | 'outline' | 'destructive' {
-    if (status === 'applied') {
-        return 'secondary';
-    }
-
-    return status === 'failed' ? 'destructive' : 'outline';
-}
 
 function update(extension: Extension, changes: Partial<Extension>): void {
     router.visit(
@@ -229,35 +197,10 @@ function remove(extension: Extension): void {
             description="Internal numbers of this tenant. Each one is a SIP account on the tenant's PBX node; phones of this tenant can call each other."
         />
 
-        <Alert
+        <ProvisioningStalledAlert
             v-if="provisioningStalled"
-            variant="destructive"
-            data-test="provisioning-stalled"
-        >
-            <AlertTitle>Changes are not reaching the PBX</AlertTitle>
-            <AlertDescription v-if="page.props.auth.user.is_platform_admin">
-                A change has waited since
-                {{ new Date(provisioningStalled.since).toLocaleTimeString() }}.
-                <template v-if="provisioningStalled.reason === 'relay'">
-                    The outbox is not being relayed: check that the scheduler
-                    runs (<code>php artisan schedule:work</code>, or cron with
-                    <code>schedule:run</code>).
-                </template>
-                <template v-else>
-                    Nothing works the provisioning queue: check that a worker
-                    runs with
-                    <code>php artisan queue:work --queue=provisioning</code>.
-                </template>
-                Locally, restart <code>composer run dev</code>. Until then, a
-                new SIP password shown here does not work on the phone yet.
-            </AlertDescription>
-            <AlertDescription v-else>
-                A change has waited since
-                {{ new Date(provisioningStalled.since).toLocaleTimeString() }}.
-                Phones keep their old settings until it is written, so a new SIP
-                password does not work yet. Tell your platform admin.
-            </AlertDescription>
-        </Alert>
+            :stall="provisioningStalled"
+        />
 
         <Alert v-if="!assignment">
             <AlertTitle>No PBX node yet</AlertTitle>
@@ -438,37 +381,9 @@ function remove(extension: Extension): void {
                             >
                         </td>
                         <td class="px-4 py-2">
-                            <div class="flex items-center gap-2">
-                                <Badge
-                                    :variant="
-                                        provisioningVariant(
-                                            extension.provisioning?.status,
-                                        )
-                                    "
-                                    :title="
-                                        extension.provisioning?.error_message ??
-                                        undefined
-                                    "
-                                    >{{
-                                        extension.provisioning
-                                            ? provisioningLabels[
-                                                  extension.provisioning.status
-                                              ]
-                                            : 'Not written'
-                                    }}</Badge
-                                >
-                                <span
-                                    v-if="extension.provisioning?.error_code"
-                                    class="max-w-48 truncate text-xs text-muted-foreground"
-                                    :title="
-                                        extension.provisioning.error_message ??
-                                        undefined
-                                    "
-                                    >{{
-                                        extension.provisioning.error_code
-                                    }}</span
-                                >
-                            </div>
+                            <ProvisioningBadge
+                                :provisioning="extension.provisioning"
+                            />
                         </td>
                         <td v-if="canManage" class="px-4 py-2 text-right">
                             <div class="flex justify-end gap-2">

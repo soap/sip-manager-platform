@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -30,7 +31,10 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
 
-        Relation::morphMap([Extension::MORPH => Extension::class]);
+        Relation::morphMap([
+            Extension::MORPH => Extension::class,
+            RingGroup::MORPH => RingGroup::class,
+        ]);
 
         $this->configureDevCommands();
     }

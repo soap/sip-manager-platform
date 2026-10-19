@@ -18,6 +18,7 @@ use App\Modules\Provisioning\Models\OutboxMessage;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Telephony\Models\SipCredential;
 use App\Modules\Tenancy\Enums\TenantRole;
 use App\Modules\Tenancy\Models\Tenant;
@@ -427,6 +428,61 @@ it('does not count retrying or finished operations, or other tenants, as stalled
 
     $this->get(route('tenant.extensions.index', $tenant))
         ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled', null));
+});
+
+it('compiles a ring group that rings all members, then fails over', function () {
+    $node = fakeNode();
+    [$tenant, $assignment] = provisioningTenant();
+    $first = Extension::factory()->on($assignment)->create(['extension_number' => '20101']);
+    $second = Extension::factory()->on($assignment)->create(['extension_number' => '20102']);
+    $disabled = Extension::factory()->on($assignment)->disabled()->create(['extension_number' => '20103']);
+
+    $this->post(route('tenant.ring-groups.store', $tenant), [
+        'number' => '20500', 'name' => 'Sales', 'strategy' => 'ring_all', 'ring_seconds' => 25,
+        'members' => [$first->id, $disabled->id, $second->id], 'failover_type' => 'extension', 'failover_id' => $first->id,
+    ])->assertSessionHasNoErrors();
+    applyPendingRevisions();
+
+    expect($node->extens['20500'])->toBe([
+        ['priority' => 1, 'app' => 'GotoIf', 'appdata' => '$["${CALLERID(num):0:2}" != "20"]?denied,1'],
+        ['priority' => 2, 'app' => 'Dial', 'appdata' => 'PJSIP/20101@opensips&PJSIP/20102@opensips,25'],
+        ['priority' => 3, 'app' => 'Goto', 'appdata' => '20101,1'],
+    ])
+        ->and($node->subscribers)->not->toHaveKey('20500');
+});
+
+it('compiles a sequential ring group one member at a time, hanging up at the end', function () {
+    $node = fakeNode();
+    [$tenant, $assignment] = provisioningTenant();
+    $first = Extension::factory()->on($assignment)->create(['extension_number' => '20101']);
+    $second = Extension::factory()->on($assignment)->create(['extension_number' => '20102']);
+
+    $this->post(route('tenant.ring-groups.store', $tenant), [
+        'number' => '20500', 'name' => 'Support', 'strategy' => 'sequential', 'ring_seconds' => 10,
+        'members' => [$second->id, $first->id], 'failover_type' => 'hangup',
+    ]);
+    applyPendingRevisions();
+
+    expect(array_column($node->extens['20500'], 'appdata', 'priority'))->toBe([
+        1 => '$["${CALLERID(num):0:2}" != "20"]?denied,1',
+        2 => 'PJSIP/20102@opensips,10',
+        3 => 'PJSIP/20101@opensips,10',
+        4 => '',
+    ]);
+});
+
+it('sends callers of a disabled ring group to denied', function () {
+    $node = fakeNode();
+    [$tenant, $assignment] = provisioningTenant();
+    $group = RingGroup::factory()->on($assignment)->create(['number' => '20500']);
+
+    $this->patch(route('tenant.ring-groups.update', [$tenant, $group->id]), [
+        'name' => $group->name, 'strategy' => 'ring_all', 'ring_seconds' => 20, 'members' => [],
+        'failover_type' => 'hangup', 'status' => 'disabled',
+    ])->assertSessionHasNoErrors();
+    applyPendingRevisions();
+
+    expect($node->extens['20500'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
 });
 
 it('returns the same operation for a repeated idempotency key', function () {

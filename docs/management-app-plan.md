@@ -74,7 +74,7 @@
 - Compile: exten ของกลุ่มใน `managed` = GotoIf ตรวจ prefix ผู้โทร (D1) → `Dial(PJSIP/a@opensips&PJSIP/b@opensips,N)` (ring_all) หรือ Dial ทีละคน (sequential) → failover
 - กติกา: ลบ extension = เอาออกจากกลุ่มใน transaction เดียวกัน + recompile กลุ่ม; extension ที่ปิดถูกข้ามตอน compile; ไม่มีสมาชิก active = ไป failover ทันที
 - ข้อควรระวัง Phase 4: สายเข้าจาก DID ไม่ผ่านการตรวจ prefix ผู้โทร — ต้องมี context สำหรับสายเข้าแยก
-- **สถานะ:** ทำ `dial_numbers` แล้ว; ring group เป็นรอบถัดไป
+- **สถานะ (20 ต.ค. 2026):** ทำแล้วทั้งหมด — `ring_groups`, `ring_group_members` (สูงสุด 10 คน: `Dial()` ของ ring_all ต้องอยู่ใน `appdata` 256 ตัวอักษร), ring time 5–120 วินาที, failover = hangup / extension / ring group (กันวนกลับด้วยการไล่ chain), เลขเริ่มที่ PP500; ปิด extension = recompile กลุ่มที่มีเป็นสมาชิก/failover; ลบ extension หรือกลุ่ม = failover ที่ชี้มาเปลี่ยนเป็น hangup + recompile; เปลี่ยน prefix/เอา tenant ออกจาก node ทำไม่ได้ถ้ายังมีเบอร์ใน `dial_numbers`; หน้า `/t/{slug}/ring-groups` (สร้าง, แก้, เรียงสมาชิก, สถานะบน PBX); ทดสอบบน node lab: 20500 ring_all (20101, 20102) → `applied`
 
 ---
 
@@ -328,5 +328,7 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - 153 tests ผ่าน, Larastan/vue-tsc/lint/build ผ่าน
 - ยังไม่ทำ: voicemail (`voicemail_enabled`), AMI read-back (`dialplan show`), API v1 + Idempotency-Key, หน้า Operations, reconciliation (M6), ring group (D5), กดเลขสั้น 3 หลัก, ปิด `direct_dial` บน node (ทำใน SIP Deployer ก่อน M5)
 
+- คำเตือนเมื่อการเปลี่ยนแปลงค้างเกิน 30 วินาที (`ProvisioningHealth`): แยก relay/scheduler กับ queue worker; platform admin เห็นคำสั่งที่ต้องรัน, ผู้ใช้ tenant เห็นข้อความทั่วไป
+
 ### ถัดไป
-ทดสอบด้วย Yealink 2 เครื่อง (P0) → ring group (D5) → voicemail → AmiClient + read-back ผ่าน AMI → API v1 (M5)
+ทดสอบ ring group ด้วยโทรศัพท์ → voicemail → AmiClient + read-back ผ่าน AMI → API v1 (M5)
