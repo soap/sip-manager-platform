@@ -5,8 +5,11 @@ namespace App\Modules\Nodes\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Modules\Nodes\Actions\CheckNodeConnections;
 use App\Modules\Nodes\Actions\SyncNodes;
+use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
 use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -20,7 +23,14 @@ class NodeController extends Controller
 
         return Inertia::render('admin/nodes/Index', [
             'deployerConfigured' => filled(config('services.sip_deployer.url')) && filled(config('services.sip_deployer.token')),
+            'unassignedTenants' => Tenant::query()
+                ->whereDoesntHave('pbxAssignment')
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
+            'assignmentStatuses' => AssignmentStatus::options(),
             'nodes' => SipNode::query()
+                ->with(['assignments' => fn ($query) => $query->with('tenant:id,name,slug')->withCount('extensions')->orderBy('number_range_start')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
@@ -41,6 +51,14 @@ class NodeController extends Controller
                     'checked_at' => $node->checked_at?->toIso8601String(),
                     'synced_at' => $node->synced_at?->toIso8601String(),
                     'removed_at' => $node->removed_at?->toIso8601String(),
+                    'assignments' => $node->assignments->map(fn (TenantPbxAssignment $assignment): array => [
+                        'id' => $assignment->id,
+                        'tenant' => ['name' => $assignment->tenant->name, 'slug' => $assignment->tenant->slug],
+                        'number_range_start' => $assignment->number_range_start,
+                        'number_range_end' => $assignment->number_range_end,
+                        'status' => $assignment->status->value,
+                        'extensions_count' => $assignment->extensions_count,
+                    ]),
                 ]),
         ]);
     }

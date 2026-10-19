@@ -20,6 +20,14 @@ class SipNodePolicy
         return $user->is_platform_admin;
     }
 
+    /**
+     * Placing tenants on nodes and handing out their blocks of numbers.
+     */
+    public function manageAssignments(User $user): bool
+    {
+        return $user->is_platform_admin;
+    }
+
     public function check(User $user, SipNode $node): bool
     {
         return $user->is_platform_admin;

@@ -1,11 +1,25 @@
 <script setup lang="ts">
-import { Form, Head } from '@inertiajs/vue3';
+import { Form, Head, Link, router, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import AssignmentController from '@/actions/App/Modules/Nodes/Http/Controllers/Admin/AssignmentController';
 import NodeController from '@/actions/App/Modules/Nodes/Http/Controllers/Admin/NodeController';
 import Heading from '@/components/Heading.vue';
+import InputError from '@/components/InputError.vue';
+import NativeSelect from '@/components/NativeSelect.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { index } from '@/routes/admin/nodes';
+import { index as tenantExtensions } from '@/routes/tenant/extensions';
 
 type NodeService = {
     release: string | null;
@@ -14,8 +28,19 @@ type NodeService = {
     features?: string[];
 };
 
-defineProps<{
+type Assignment = {
+    id: number;
+    tenant: { name: string; slug: string };
+    number_range_start: number;
+    number_range_end: number;
+    status: 'active' | 'suspended';
+    extensions_count: number;
+};
+
+const props = defineProps<{
     deployerConfigured: boolean;
+    unassignedTenants: { value: string; label: string }[];
+    assignmentStatuses: { value: string; label: string }[];
     nodes: {
         id: number;
         deployer_id: number;
@@ -36,8 +61,37 @@ defineProps<{
         checked_at: string | null;
         synced_at: string | null;
         removed_at: string | null;
+        assignments: Assignment[];
     }[];
 }>();
+
+const page = usePage();
+const pageErrors = computed(() => page.props.errors as Record<string, string>);
+const activeNodes = computed(() =>
+    props.nodes.filter((node) => !node.removed_at),
+);
+
+/**
+ * The thousand after the highest block on the node, e.g. 2000 after 1000–1999.
+ */
+function suggestedStart(assignments: Assignment[]): string {
+    const highest = Math.max(
+        999,
+        ...assignments.map((assignment) => assignment.number_range_end),
+    );
+
+    return String(Math.ceil((highest + 1) / 1000) * 1000);
+}
+
+function unassign(assignment: Assignment, nodeName: string): void {
+    if (!confirm(`Take ${assignment.tenant.name} off ${nodeName}?`)) {
+        return;
+    }
+
+    router.visit(AssignmentController.destroy({ assignment: assignment.id }), {
+        preserveScroll: true,
+    });
+}
 
 defineOptions({
     layout: {
@@ -251,5 +305,150 @@ function formatDate(value: string | null): string {
                 </tbody>
             </table>
         </div>
+
+        <Heading
+            variant="small"
+            title="Tenants and numbers"
+            description="Tenants on a node share its SIP domain and dialplan, so each gets its own block of numbers. Blocks on one node never overlap."
+        />
+
+        <Card v-for="node in activeNodes" :key="node.id">
+            <CardHeader>
+                <CardTitle>{{ node.name }}</CardTitle>
+                <CardDescription class="font-mono">{{
+                    node.sip_domain
+                }}</CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-4">
+                <div
+                    v-for="assignment in node.assignments"
+                    :key="assignment.id"
+                    class="grid gap-2 rounded-lg border p-3"
+                >
+                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                        <Link
+                            :href="
+                                tenantExtensions({
+                                    tenant: assignment.tenant.slug,
+                                })
+                            "
+                            class="font-medium underline-offset-4 hover:underline"
+                            >{{ assignment.tenant.name }}</Link
+                        >
+                        <span class="text-muted-foreground"
+                            >{{ assignment.extensions_count }} extensions</span
+                        >
+                    </div>
+                    <Form
+                        v-bind="
+                            AssignmentController.update.form({
+                                assignment: assignment.id,
+                            })
+                        "
+                        :options="{ preserveScroll: true }"
+                        class="grid gap-2 sm:grid-cols-[8rem_8rem_9rem_auto_auto] sm:items-start"
+                        v-slot="{ errors, processing }"
+                    >
+                        <div class="grid gap-1">
+                            <Input
+                                name="number_range_start"
+                                inputmode="numeric"
+                                aria-label="First number"
+                                :default-value="
+                                    String(assignment.number_range_start)
+                                "
+                            />
+                            <InputError :message="errors.number_range_start" />
+                        </div>
+                        <div class="grid gap-1">
+                            <Input
+                                name="number_range_end"
+                                inputmode="numeric"
+                                aria-label="Last number"
+                                :default-value="
+                                    String(assignment.number_range_end)
+                                "
+                            />
+                            <InputError :message="errors.number_range_end" />
+                        </div>
+                        <NativeSelect
+                            name="status"
+                            aria-label="Status"
+                            :options="assignmentStatuses"
+                            :default-value="assignment.status"
+                        />
+                        <Button variant="outline" :disabled="processing"
+                            >Save</Button
+                        >
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            class="text-destructive"
+                            :disabled="assignment.extensions_count > 0"
+                            :title="
+                                assignment.extensions_count > 0
+                                    ? 'Delete the tenant\'s extensions first'
+                                    : undefined
+                            "
+                            @click="unassign(assignment, node.name)"
+                            >Remove</Button
+                        >
+                    </Form>
+                </div>
+
+                <p
+                    v-if="node.assignments.length === 0"
+                    class="text-sm text-muted-foreground"
+                >
+                    No tenants on this node yet.
+                </p>
+
+                <Form
+                    v-if="unassignedTenants.length > 0"
+                    v-bind="AssignmentController.store.form({ node: node.id })"
+                    reset-on-success
+                    :options="{ preserveScroll: true }"
+                    class="grid gap-2 border-t pt-4 sm:grid-cols-[1fr_8rem_8rem_auto] sm:items-end"
+                    v-slot="{ errors, processing }"
+                >
+                    <div class="grid gap-1">
+                        <Label :for="`tenant-${node.id}`">Add tenant</Label>
+                        <NativeSelect
+                            :id="`tenant-${node.id}`"
+                            name="tenant_id"
+                            :options="unassignedTenants"
+                            :default-value="unassignedTenants[0]?.value"
+                        />
+                        <InputError
+                            :message="errors.tenant_id ?? errors.sip_node_id"
+                        />
+                    </div>
+                    <div class="grid gap-1">
+                        <Label :for="`start-${node.id}`">First number</Label>
+                        <Input
+                            :id="`start-${node.id}`"
+                            name="number_range_start"
+                            inputmode="numeric"
+                            required
+                            :placeholder="suggestedStart(node.assignments)"
+                        />
+                        <InputError :message="errors.number_range_start" />
+                    </div>
+                    <div class="grid gap-1">
+                        <Label :for="`end-${node.id}`">Last number</Label>
+                        <Input
+                            :id="`end-${node.id}`"
+                            name="number_range_end"
+                            inputmode="numeric"
+                            required
+                        />
+                        <InputError :message="errors.number_range_end" />
+                    </div>
+                    <Button :disabled="processing">Assign</Button>
+                </Form>
+            </CardContent>
+        </Card>
+
+        <InputError :message="pageErrors.assignment" />
     </div>
 </template>

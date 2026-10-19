@@ -3,6 +3,7 @@
 namespace App\Modules\Tenancy\Models;
 
 use App\Models\User;
+use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Enums\TenantStatus;
 use App\Modules\Tenancy\Policies\TenantPolicy;
 use Database\Factories\TenantFactory;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -54,6 +56,16 @@ class Tenant extends Model
         return $this->belongsToMany(User::class, 'tenant_memberships')
             ->withPivot('id', 'role')
             ->withTimestamps();
+    }
+
+    /**
+     * The tenant's primary PBX node and its block of numbers there.
+     *
+     * @return HasOne<TenantPbxAssignment, $this>
+     */
+    public function pbxAssignment(): HasOne
+    {
+        return $this->hasOne(TenantPbxAssignment::class);
     }
 
     public function isActive(): bool

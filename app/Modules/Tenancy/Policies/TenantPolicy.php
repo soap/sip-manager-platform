@@ -30,6 +30,14 @@ class TenantPolicy
         return $user->is_platform_admin || ($user->roleIn($tenant)?->canManageMembers() ?? false);
     }
 
+    /**
+     * Extensions (and later devices and routes): the same people who manage members.
+     */
+    public function manageExtensions(User $user, Tenant $tenant): bool
+    {
+        return $this->manageMembers($user, $tenant);
+    }
+
     public function viewAuditLog(User $user, Tenant $tenant): bool
     {
         return $this->manageMembers($user, $tenant);
