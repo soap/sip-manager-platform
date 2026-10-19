@@ -2,20 +2,16 @@
 
 namespace App\Modules\Nodes\Http\Requests;
 
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Nodes\Models\TenantNumberRange;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class StoreAssignmentRequest extends FormRequest
 {
-    /** Extension numbers have two to six digits. */
-    public const MIN_NUMBER = 10;
-
-    public const MAX_NUMBER = 999999;
-
     public function authorize(): bool
     {
-        return $this->user()?->can('manageAssignments', SipNode::class) ?? false;
+        return $this->user()?->can('manageAssignments', PbxNode::class) ?? false;
     }
 
     /**
@@ -25,8 +21,7 @@ class StoreAssignmentRequest extends FormRequest
     {
         return [
             'tenant_id' => ['required', 'string', Rule::exists('tenants', 'id')],
-            'number_range_start' => ['required', 'integer', 'min:'.self::MIN_NUMBER, 'max:'.self::MAX_NUMBER],
-            'number_range_end' => ['required', 'integer', 'gte:number_range_start', 'max:'.self::MAX_NUMBER],
+            'prefix' => self::prefixRules(),
         ];
     }
 
@@ -35,8 +30,23 @@ class StoreAssignmentRequest extends FormRequest
      */
     public function messages(): array
     {
-        return [
-            'number_range_end.gte' => 'The last number must not be below the first.',
-        ];
+        return self::prefixMessages();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function prefixRules(): array
+    {
+        // 20–89: never 0, 1 or 9 first (emergency, hotline and outbound numbers)
+        return ['required', 'string', 'regex:/^[2-8][0-9]$/'];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function prefixMessages(): array
+    {
+        return ['prefix.regex' => 'Use a two-digit prefix from '.TenantNumberRange::FIRST_PREFIX.' to '.TenantNumberRange::LAST_PREFIX.'.'];
     }
 }

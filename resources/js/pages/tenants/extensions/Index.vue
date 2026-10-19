@@ -33,8 +33,8 @@ defineProps<{
     assignment: {
         node: string;
         sip_domain: string | null;
-        number_range_start: number;
-        number_range_end: number;
+        prefix: string;
+        numbers: string;
         status: 'active' | 'suspended';
     } | null;
     extensions: Extension[];
@@ -139,12 +139,16 @@ function remove(extension: Extension): void {
                 }}</span></span
             >
             <span
+                >Prefix
+                <span class="font-mono text-foreground">{{
+                    assignment.prefix
+                }}</span></span
+            >
+            <span
                 >Numbers
-                <span class="font-mono text-foreground"
-                    >{{ assignment.number_range_start }}–{{
-                        assignment.number_range_end
-                    }}</span
-                ></span
+                <span class="font-mono text-foreground">{{
+                    assignment.numbers
+                }}</span></span
             >
             <Badge
                 v-if="assignment.status === 'suspended'"
@@ -157,6 +161,7 @@ function remove(extension: Extension): void {
             <CardHeader>
                 <CardTitle>New extension</CardTitle>
                 <CardDescription>
+                    Five digits: prefix {{ assignment.prefix }} and three more.
                     The number cannot change later; phones register with it.
                 </CardDescription>
             </CardHeader>
@@ -178,9 +183,10 @@ function remove(extension: Extension): void {
                             id="extension_number"
                             name="extension_number"
                             inputmode="numeric"
+                            maxlength="5"
                             required
                             :default-value="nextNumber ?? ''"
-                            :placeholder="String(assignment.number_range_start)"
+                            :placeholder="`${assignment.prefix}001`"
                         />
                         <InputError :message="formErrors.extension_number" />
                     </div>

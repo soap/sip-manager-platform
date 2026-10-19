@@ -17,8 +17,8 @@ class StoreExtensionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // two to six digits without a leading zero, inside the tenant's block (checked by the action)
-            'extension_number' => ['required', 'string', 'regex:/^[1-9][0-9]{1,5}$/'],
+            // five digits: the tenant's prefix (20–89, checked by the action) and three more
+            'extension_number' => ['required', 'string', 'regex:/^[2-8][0-9]{4}$/'],
             'display_name' => ['required', 'string', 'max:100'],
         ];
     }
@@ -29,7 +29,7 @@ class StoreExtensionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'extension_number.regex' => 'Use two to six digits, not starting with 0.',
+            'extension_number.regex' => 'Use five digits: the tenant\'s prefix and three more.',
         ];
     }
 }

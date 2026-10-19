@@ -22,7 +22,7 @@ class ExtensionFactory extends Factory
     public function definition(): array
     {
         return [
-            'extension_number' => (string) fake()->unique()->numberBetween(1000, 1999),
+            'extension_number' => (string) fake()->unique()->numberBetween(20000, 20999),
             'display_name' => fake()->name(),
             'status' => ExtensionStatus::Active,
         ];
@@ -33,6 +33,6 @@ class ExtensionFactory extends Factory
      */
     public function on(TenantPbxAssignment $assignment): static
     {
-        return $this->state(fn (): array => ['tenant_id' => $assignment->tenant_id, 'sip_node_id' => $assignment->sip_node_id]);
+        return $this->state(fn (): array => ['tenant_id' => $assignment->tenant_id, 'pbx_node_id' => $assignment->pbx_node_id]);
     }
 }

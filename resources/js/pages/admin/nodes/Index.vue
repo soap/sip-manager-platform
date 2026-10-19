@@ -31,8 +31,8 @@ type NodeService = {
 type Assignment = {
     id: number;
     tenant: { name: string; slug: string };
-    number_range_start: number;
-    number_range_end: number;
+    prefix: string | null;
+    numbers: string | null;
     status: 'active' | 'suspended';
     extensions_count: number;
 };
@@ -43,7 +43,7 @@ const props = defineProps<{
     assignmentStatuses: { value: string; label: string }[];
     nodes: {
         id: number;
-        deployer_id: number;
+        deployer_server_id: number;
         name: string;
         sip_domain: string | null;
         environment: string;
@@ -61,6 +61,7 @@ const props = defineProps<{
         checked_at: string | null;
         synced_at: string | null;
         removed_at: string | null;
+        next_prefix: string | null;
         assignments: Assignment[];
     }[];
 }>();
@@ -70,18 +71,6 @@ const pageErrors = computed(() => page.props.errors as Record<string, string>);
 const activeNodes = computed(() =>
     props.nodes.filter((node) => !node.removed_at),
 );
-
-/**
- * The thousand after the highest block on the node, e.g. 2000 after 1000–1999.
- */
-function suggestedStart(assignments: Assignment[]): string {
-    const highest = Math.max(
-        999,
-        ...assignments.map((assignment) => assignment.number_range_end),
-    );
-
-    return String(Math.ceil((highest + 1) / 1000) * 1000);
-}
 
 function unassign(assignment: Assignment, nodeName: string): void {
     if (!confirm(`Take ${assignment.tenant.name} off ${nodeName}?`)) {
@@ -169,7 +158,7 @@ function formatDate(value: string | null): string {
                                 class="font-mono text-xs text-muted-foreground"
                             >
                                 {{ node.management_address }} · #{{
-                                    node.deployer_id
+                                    node.deployer_server_id
                                 }}
                             </div>
                         </td>
@@ -309,7 +298,7 @@ function formatDate(value: string | null): string {
         <Heading
             variant="small"
             title="Tenants and numbers"
-            description="Tenants on a node share its SIP domain and dialplan, so each gets its own block of numbers. Blocks on one node never overlap."
+            description="Tenants on a node share its SIP domain and dialplan, so each gets its own two-digit prefix (20–89): prefix 20 owns the numbers 20000–20999."
         />
 
         <Card v-for="node in activeNodes" :key="node.id">
@@ -335,6 +324,9 @@ function formatDate(value: string | null): string {
                             class="font-medium underline-offset-4 hover:underline"
                             >{{ assignment.tenant.name }}</Link
                         >
+                        <span class="font-mono text-muted-foreground">{{
+                            assignment.numbers
+                        }}</span>
                         <span class="text-muted-foreground"
                             >{{ assignment.extensions_count }} extensions</span
                         >
@@ -346,30 +338,24 @@ function formatDate(value: string | null): string {
                             })
                         "
                         :options="{ preserveScroll: true }"
-                        class="grid gap-2 sm:grid-cols-[8rem_8rem_9rem_auto_auto] sm:items-start"
+                        class="grid gap-2 sm:grid-cols-[6rem_9rem_auto_auto] sm:items-start"
                         v-slot="{ errors, processing }"
                     >
                         <div class="grid gap-1">
                             <Input
-                                name="number_range_start"
+                                name="prefix"
                                 inputmode="numeric"
-                                aria-label="First number"
-                                :default-value="
-                                    String(assignment.number_range_start)
+                                maxlength="2"
+                                aria-label="Prefix"
+                                :readonly="assignment.extensions_count > 0"
+                                :title="
+                                    assignment.extensions_count > 0
+                                        ? 'The prefix is fixed while the tenant has extensions'
+                                        : undefined
                                 "
+                                :default-value="assignment.prefix ?? ''"
                             />
-                            <InputError :message="errors.number_range_start" />
-                        </div>
-                        <div class="grid gap-1">
-                            <Input
-                                name="number_range_end"
-                                inputmode="numeric"
-                                aria-label="Last number"
-                                :default-value="
-                                    String(assignment.number_range_end)
-                                "
-                            />
-                            <InputError :message="errors.number_range_end" />
+                            <InputError :message="errors.prefix" />
                         </div>
                         <NativeSelect
                             name="status"
@@ -408,7 +394,7 @@ function formatDate(value: string | null): string {
                     v-bind="AssignmentController.store.form({ node: node.id })"
                     reset-on-success
                     :options="{ preserveScroll: true }"
-                    class="grid gap-2 border-t pt-4 sm:grid-cols-[1fr_8rem_8rem_auto] sm:items-end"
+                    class="grid gap-2 border-t pt-4 sm:grid-cols-[1fr_6rem_auto] sm:items-end"
                     v-slot="{ errors, processing }"
                 >
                     <div class="grid gap-1">
@@ -420,31 +406,27 @@ function formatDate(value: string | null): string {
                             :default-value="unassignedTenants[0]?.value"
                         />
                         <InputError
-                            :message="errors.tenant_id ?? errors.sip_node_id"
+                            :message="errors.tenant_id ?? errors.pbx_node_id"
                         />
                     </div>
                     <div class="grid gap-1">
-                        <Label :for="`start-${node.id}`">First number</Label>
+                        <Label :for="`prefix-${node.id}`">Prefix</Label>
                         <Input
-                            :id="`start-${node.id}`"
-                            name="number_range_start"
+                            :id="`prefix-${node.id}`"
+                            name="prefix"
                             inputmode="numeric"
+                            maxlength="2"
                             required
-                            :placeholder="suggestedStart(node.assignments)"
+                            :default-value="node.next_prefix ?? ''"
                         />
-                        <InputError :message="errors.number_range_start" />
                     </div>
-                    <div class="grid gap-1">
-                        <Label :for="`end-${node.id}`">Last number</Label>
-                        <Input
-                            :id="`end-${node.id}`"
-                            name="number_range_end"
-                            inputmode="numeric"
-                            required
-                        />
-                        <InputError :message="errors.number_range_end" />
-                    </div>
-                    <Button :disabled="processing">Assign</Button>
+                    <Button :disabled="processing || !node.next_prefix"
+                        >Assign</Button
+                    >
+                    <InputError
+                        class="sm:col-span-3"
+                        :message="errors.prefix"
+                    />
                 </Form>
             </CardContent>
         </Card>

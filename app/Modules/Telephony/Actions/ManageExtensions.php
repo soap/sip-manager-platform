@@ -3,6 +3,7 @@
 namespace App\Modules\Telephony\Actions;
 
 use App\Modules\Audit\Audit;
+use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Models\Extension;
@@ -12,9 +13,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Creates, changes and deletes the extensions of the tenant in the context. A number must lie in
- * the tenant's block on its node; the number cannot change later, since phones register with it.
- * Writing to the node is the provisioning step's job, not this one's.
+ * Creates, changes and deletes the extensions of the tenant in the context. A number is the
+ * tenant's two-digit prefix followed by three digits (e.g. 20101); it cannot change later, since
+ * phones register with it. Writing to the node is the provisioning step's job, not this one's.
  */
 class ManageExtensions
 {
@@ -22,14 +23,14 @@ class ManageExtensions
 
     public function create(string $number, string $displayName): Extension
     {
-        $assignment = $this->assignment();
+        [$assignment, $range] = $this->placement();
 
         if (! $assignment->isActive()) {
             throw ValidationException::withMessages(['extension_number' => 'This tenant\'s numbers are suspended.']);
         }
 
-        if (! $assignment->contains($number)) {
-            throw ValidationException::withMessages(['extension_number' => "Use a number from {$assignment->rangeLabel()}."]);
+        if (! $range->contains($number)) {
+            throw ValidationException::withMessages(['extension_number' => "Use a number from {$range->label()}."]);
         }
 
         if (Extension::query()->where('extension_number', $number)->exists()) {
@@ -39,7 +40,7 @@ class ManageExtensions
         try {
             return DB::transaction(function () use ($assignment, $number, $displayName): Extension {
                 $extension = Extension::query()->create([
-                    'sip_node_id' => $assignment->sip_node_id,
+                    'pbx_node_id' => $assignment->pbx_node_id,
                     'extension_number' => $number,
                     'display_name' => $displayName,
                 ]);
@@ -77,35 +78,44 @@ class ManageExtensions
     }
 
     /**
-     * The lowest free number in the tenant's block, to suggest for the next extension.
+     * The lowest free number of the tenant from PP001 up (PP000 last), to suggest for the next
+     * extension.
      */
     public function nextFreeNumber(): ?string
     {
-        $assignment = $this->context->tenant()?->pbxAssignment;
+        $range = $this->context->tenant()?->numberRange;
 
-        if ($assignment === null) {
+        if ($range === null) {
             return null;
         }
 
-        $used = Extension::query()->pluck('extension_number')->map(fn (string $number): int => (int) $number)->flip();
+        $used = Extension::query()->pluck('extension_number')->flip();
+        $last = 10 ** TenantNumberRange::EXTENSION_DIGITS - 1;
 
-        for ($number = $assignment->number_range_start; $number <= $assignment->number_range_end; $number++) {
+        foreach ([...range(1, $last), 0] as $extension) {
+            $number = $range->prefix.str_pad((string) $extension, TenantNumberRange::EXTENSION_DIGITS, '0', STR_PAD_LEFT);
+
             if (! $used->has($number)) {
-                return (string) $number;
+                return $number;
             }
         }
 
         return null;
     }
 
-    private function assignment(): TenantPbxAssignment
+    /**
+     * @return array{TenantPbxAssignment, TenantNumberRange}
+     */
+    private function placement(): array
     {
-        $assignment = $this->context->tenant()?->pbxAssignment;
+        $tenant = $this->context->tenant();
+        $assignment = $tenant?->pbxAssignment;
+        $range = $tenant?->numberRange;
 
-        if ($assignment === null) {
+        if ($assignment === null || $range === null) {
             throw ValidationException::withMessages(['extension_number' => 'This tenant has no PBX node yet. A platform admin assigns one.']);
         }
 
-        return $assignment;
+        return [$assignment, $range];
     }
 }

@@ -19,14 +19,14 @@ class ExtensionController extends Controller
 {
     public function index(Request $request, Tenant $tenant, ManageExtensions $extensions): Response
     {
-        $assignment = $tenant->pbxAssignment()->with('node:id,name,sip_domain')->first();
+        $assignment = $tenant->pbxAssignment()->with(['node:id,name,sip_domain', 'numberRange'])->first();
 
         return Inertia::render('tenants/extensions/Index', [
-            'assignment' => $assignment === null ? null : [
+            'assignment' => $assignment?->numberRange === null ? null : [
                 'node' => $assignment->node->name,
                 'sip_domain' => $assignment->node->sip_domain,
-                'number_range_start' => $assignment->number_range_start,
-                'number_range_end' => $assignment->number_range_end,
+                'prefix' => $assignment->numberRange->prefix,
+                'numbers' => $assignment->numberRange->label(),
                 'status' => $assignment->status->value,
             ],
             'extensions' => Extension::query()

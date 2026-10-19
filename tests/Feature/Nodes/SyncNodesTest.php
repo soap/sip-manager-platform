@@ -3,8 +3,10 @@
 use App\Modules\Audit\Models\AuditLog;
 use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\NodeSecret;
+use App\Modules\Nodes\Models\PbxNode;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -64,13 +66,13 @@ it('copies the manifests and fetches the credentials with the deployer token', f
 
     $result = app(SyncNodes::class)->handle();
 
-    $node = SipNode::query()->where('deployer_id', 7)->sole();
+    $node = PbxNode::query()->where('deployer_server_id', 7)->sole();
 
     expect($result)->toMatchArray(['synced' => 1, 'added' => 1, 'removed' => 0, 'credentials_updated' => 1])
         ->and($node->sip_domain)->toBe('sip7.example.com')
         ->and($node->endpoints['opensips_db']['database'])->toBe('opensips')
         ->and($node->asteriskFeatures())->toBe(['ami', 'ari', 'realtime'])
-        ->and($node->credentials['ami']['password'])->toBe('AmiSecret')
+        ->and($node->credentials()['ami']['password'])->toBe('AmiSecret')
         ->and($node->credentials_version)->toBe('v1');
 
     Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer deployer-token')
@@ -85,7 +87,10 @@ it('stores the credentials encrypted and keeps them out of the audit log', funct
 
     app(SyncNodes::class)->handle();
 
-    expect(SipNode::query()->toBase()->value('credentials'))->not->toContain('AmiSecret')
+    expect(DB::table('node_secrets')->pluck('secret')->implode(' '))->not->toContain('AmiSecret')
+        ->and(NodeSecret::query()->where('kind', 'ami')->sole())
+        ->secret->toBe('AmiSecret')
+        ->rotated_at->toBeNull()
         ->and(AuditLog::query()->pluck('action')->all())->toBe(['node.added', 'node.credentials_updated'])
         ->and(AuditLog::query()->get()->toJson())->not->toContain('AmiSecret');
 });
@@ -103,27 +108,28 @@ it('fetches the credentials again only when their version changes', function () 
     expect(app(SyncNodes::class)->handle()['credentials_updated'])->toBe(0);
     expect(app(SyncNodes::class)->handle()['credentials_updated'])->toBe(1);
 
-    $node = SipNode::query()->sole();
+    $node = PbxNode::query()->sole();
 
-    expect($node->credentials['ami']['password'])->toBe('Rotated')
-        ->and($node->credentials_version)->toBe('v2');
+    expect($node->credentials()['ami']['password'])->toBe('Rotated')
+        ->and($node->credentials_version)->toBe('v2')
+        ->and($node->secrets()->where('kind', 'ami')->value('rotated_at'))->not->toBeNull()
+        ->and($node->secrets()->where('kind', 'opensips_db')->value('rotated_at'))->toBeNull();
     Http::assertSentCount(5);
 });
 
 it('drops the credentials when the node no longer has any', function () {
-    $node = SipNode::factory()->create(['deployer_id' => 7]);
+    $node = PbxNode::factory()->create(['deployer_server_id' => 7]);
     Http::fake(['deployer.test/api/v1/nodes' => Http::response(['data' => [deployerManifest(overrides: ['credentials_version' => null, 'endpoints' => []])]])]);
 
     app(SyncNodes::class)->handle();
 
-    expect($node->fresh())
-        ->credentials->toBeNull()
-        ->credentials_version->toBeNull();
+    expect($node->fresh()->credentials_version)->toBeNull()
+        ->and($node->secrets()->count())->toBe(0);
 });
 
 it('keeps the old credentials when the deployer refuses to hand out new ones', function () {
-    $node = SipNode::factory()->create(['deployer_id' => 7, 'credentials_version' => 'v1']);
-    $credentials = $node->credentials;
+    $node = PbxNode::factory()->create(['deployer_server_id' => 7, 'credentials_version' => 'v1']);
+    $credentials = $node->credentials();
     Http::fake([
         'deployer.test/api/v1/nodes' => Http::response(['data' => [deployerManifest(overrides: ['credentials_version' => 'v2'])]]),
         'deployer.test/api/v1/nodes/7/credentials' => Http::response(['message' => 'Invalid ability provided.'], 403),
@@ -133,14 +139,13 @@ it('keeps the old credentials when the deployer refuses to hand out new ones', f
 
     expect($result['credential_errors'])->toHaveKey(7)
         ->and($result['credential_errors'][7])->toContain('abilities')
-        ->and($node->fresh())
-        ->credentials->toBe($credentials)
-        ->credentials_version->toBe('v1');
+        ->and($node->fresh()->credentials())->toBe($credentials)
+        ->and($node->fresh()->credentials_version)->toBe('v1');
 });
 
 it('marks a node the deployer no longer lists as removed and brings it back when listed again', function () {
-    $node = SipNode::factory()->create(['deployer_id' => 7, 'credentials_version' => 'v1']);
-    $gone = SipNode::factory()->create(['deployer_id' => 8]);
+    $node = PbxNode::factory()->create(['deployer_server_id' => 7, 'credentials_version' => 'v1']);
+    $gone = PbxNode::factory()->create(['deployer_server_id' => 8]);
     Http::fakeSequence('deployer.test/api/v1/nodes')
         ->push(['data' => [deployerManifest()]])
         ->push(['data' => [deployerManifest(), deployerManifest(8, ['credentials_version' => null])]]);
@@ -160,7 +165,7 @@ it('skips a node whose manifest version it does not understand', function () {
     $result = app(SyncNodes::class)->handle();
 
     expect($result['skipped'])->toBe([7])
-        ->and(SipNode::query()->count())->toBe(0);
+        ->and(PbxNode::query()->count())->toBe(0);
 });
 
 it('retries a deployer that fails for a moment', function () {
@@ -189,7 +194,7 @@ it('syncs from the command line', function () {
         'deployer.test/api/v1/nodes/7/credentials' => Http::response(deployerCredentials()),
     ]);
 
-    $this->artisan('app:sync-sip-nodes')
+    $this->artisan('nodes:sync')
         ->expectsOutputToContain('Synced 1 nodes: 1 new')
         ->assertSuccessful();
 });
@@ -197,7 +202,7 @@ it('syncs from the command line', function () {
 it('fails on the command line when the deployer is not configured', function () {
     config(['services.sip_deployer.url' => null]);
 
-    $this->artisan('app:sync-sip-nodes')
+    $this->artisan('nodes:sync')
         ->expectsOutputToContain('not configured')
         ->assertFailed();
 });

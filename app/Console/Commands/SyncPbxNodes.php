@@ -11,9 +11,9 @@ use Illuminate\Console\Command;
 /**
  * Runs on the schedule, and by hand after a node is provisioned or its passwords are rotated.
  */
-#[Signature('app:sync-sip-nodes')]
+#[Signature('nodes:sync')]
 #[Description('Copy the OpenSIPS and Asterisk nodes and their credentials from SIP Deployer')]
-class SyncSipNodes extends Command
+class SyncPbxNodes extends Command
 {
     public function handle(SyncNodes $syncNodes): int
     {

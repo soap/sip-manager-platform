@@ -3,7 +3,7 @@
 namespace App\Modules\Nodes\Actions;
 
 use App\Modules\Nodes\AmiLogin;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\NodeConnections;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -20,7 +20,7 @@ class CheckNodeConnections
     /**
      * @return array<string, array{ok: bool, message: string}>
      */
-    public function handle(SipNode $node): array
+    public function handle(PbxNode $node): array
     {
         $checks = [];
 
@@ -60,7 +60,7 @@ class CheckNodeConnections
         return 'MariaDB '.($rows[0]->version ?? 'answered');
     }
 
-    private function ami(SipNode $node): string
+    private function ami(PbxNode $node): string
     {
         $this->amiLogin->attempt($this->connections->ami($node));
 

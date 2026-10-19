@@ -2,13 +2,13 @@
 
 use App\Models\User;
 use App\Modules\Nodes\AmiLogin;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
 use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 
 it('keeps other users out of the node pages', function () {
     signIn();
-    $node = SipNode::factory()->create();
+    $node = PbxNode::factory()->create();
 
     $this->get(route('admin.nodes.index'))->assertForbidden();
     $this->post(route('admin.nodes.sync'))->assertForbidden();
@@ -17,8 +17,8 @@ it('keeps other users out of the node pages', function () {
 
 it('lists the nodes without their passwords', function () {
     signIn(User::factory()->platformAdmin()->create());
-    $node = SipNode::factory()->create();
-    SipNode::factory()->removed()->create();
+    $node = PbxNode::factory()->create();
+    PbxNode::factory()->removed()->create();
 
     $response = $this->get(route('admin.nodes.index'))
         ->assertOk()
@@ -27,7 +27,7 @@ it('lists the nodes without their passwords', function () {
             ->where('nodes.0.id', $node->id)
             ->where('nodes.0.credentials', ['opensips_db', 'asterisk_db', 'ami', 'ari']));
 
-    expect($response->getContent())->not->toContain($node->credentials['ami']['password']);
+    expect($response->getContent())->not->toContain($node->credentials()['ami']['password']);
 });
 
 it('syncs the nodes from the deployer', function () {
@@ -50,7 +50,7 @@ it('tells the admin when the deployer cannot be asked', function () {
 });
 
 it('checks the connections of a node', function () {
-    $node = SipNode::factory()->create(['endpoints' => ['ami' => ['host' => '10.104.0.5', 'port' => 5038, 'username' => 'manager']]]);
+    $node = PbxNode::factory()->create(['endpoints' => ['ami' => ['host' => '10.104.0.5', 'port' => 5038, 'username' => 'manager']]]);
     $this->mock(AmiLogin::class)->shouldReceive('attempt')->once();
     signIn(User::factory()->platformAdmin()->create());
 

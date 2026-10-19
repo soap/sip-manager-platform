@@ -8,4 +8,4 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('app:sync-sip-nodes')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping();

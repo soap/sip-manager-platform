@@ -7,7 +7,7 @@ use App\Modules\Nodes\Actions\ManageAssignments;
 use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Http\Requests\StoreAssignmentRequest;
 use App\Modules\Nodes\Http\Requests\UpdateAssignmentRequest;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
@@ -16,13 +16,13 @@ use Inertia\Inertia;
 
 class AssignmentController extends Controller
 {
-    public function store(StoreAssignmentRequest $request, SipNode $node, ManageAssignments $assignments): RedirectResponse
+    public function store(StoreAssignmentRequest $request, PbxNode $node, ManageAssignments $assignments): RedirectResponse
     {
         $tenant = Tenant::query()->findOrFail($request->string('tenant_id')->toString());
 
-        $assignment = $assignments->assign($tenant, $node, $request->integer('number_range_start'), $request->integer('number_range_end'));
+        $assignment = $assignments->assign($tenant, $node, $request->string('prefix')->toString());
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => "{$tenant->name} is on {$node->name} with numbers {$assignment->rangeLabel()}."]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => "{$tenant->name} is on {$node->name} with numbers {$assignment->numberRange?->label()}."]);
 
         return back();
     }
@@ -31,19 +31,18 @@ class AssignmentController extends Controller
     {
         $assignments->update(
             $assignment,
-            $request->integer('number_range_start'),
-            $request->integer('number_range_end'),
+            $request->string('prefix')->toString(),
             $request->enum('status', AssignmentStatus::class) ?? AssignmentStatus::Active,
         );
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => "Numbers of {$assignment->tenant->name} updated."]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => "Assignment of {$assignment->tenant->name} updated."]);
 
         return back();
     }
 
     public function destroy(TenantPbxAssignment $assignment, ManageAssignments $assignments): RedirectResponse
     {
-        Gate::authorize('manageAssignments', SipNode::class);
+        Gate::authorize('manageAssignments', PbxNode::class);
 
         $assignments->unassign($assignment);
 

@@ -3,7 +3,7 @@
 namespace App\Modules\Nodes;
 
 use App\Modules\Nodes\Exceptions\NodeNotConnectable;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
 use Illuminate\Database\Connection;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +22,7 @@ class NodeConnections
     /**
      * The OpenSIPS database: subscribers, domains, dispatcher and dialplan tables.
      */
-    public function openSipsDatabase(SipNode $node): Connection
+    public function openSipsDatabase(PbxNode $node): Connection
     {
         return $this->database($node, 'opensips_db');
     }
@@ -30,7 +30,7 @@ class NodeConnections
     /**
      * The Asterisk realtime database: PJSIP endpoints, extensions, voicemail, queues and CDR.
      */
-    public function asteriskDatabase(SipNode $node): Connection
+    public function asteriskDatabase(PbxNode $node): Connection
     {
         return $this->database($node, 'asterisk_db');
     }
@@ -38,7 +38,7 @@ class NodeConnections
     /**
      * An HTTP client for the node's ARI, with the base URL ending in /ari/.
      */
-    public function ari(SipNode $node): PendingRequest
+    public function ari(PbxNode $node): PendingRequest
     {
         $endpoint = $this->endpoint($node, 'ari');
 
@@ -54,7 +54,7 @@ class NodeConnections
      *
      * @return array{host: string, port: int, username: string, password: string}
      */
-    public function ami(SipNode $node): array
+    public function ami(PbxNode $node): array
     {
         $endpoint = $this->endpoint($node, 'ami');
 
@@ -71,11 +71,11 @@ class NodeConnections
      *
      * @return list<string>
      */
-    public function available(SipNode $node): array
+    public function available(PbxNode $node): array
     {
         return array_values(array_filter(
             array_keys($node->endpoints),
-            fn (string $name): bool => isset($node->credentials[$name]),
+            fn (string $name): bool => isset($node->credentials()[$name]),
         ));
     }
 
@@ -83,7 +83,7 @@ class NodeConnections
      * A named connection per node and database, reused within the process and rebuilt when the
      * manifest or the credentials change.
      */
-    private function database(SipNode $node, string $name): Connection
+    private function database(PbxNode $node, string $name): Connection
     {
         $endpoint = $this->endpoint($node, $name);
 
@@ -91,7 +91,7 @@ class NodeConnections
             throw NodeNotConnectable::missingEndpoint($node, $name);
         }
 
-        $connection = "sip_node_{$node->id}_{$name}";
+        $connection = "pbx_node_{$node->id}_{$name}";
 
         $config = [
             'driver' => 'mariadb',
@@ -122,7 +122,7 @@ class NodeConnections
      *
      * @return array{host: string, port: int, username: string, password: string, database?: string, scheme?: string}
      */
-    private function endpoint(SipNode $node, string $name): array
+    private function endpoint(PbxNode $node, string $name): array
     {
         $endpoint = $node->endpoints[$name] ?? null;
 
@@ -130,7 +130,7 @@ class NodeConnections
             throw NodeNotConnectable::missingEndpoint($node, $name);
         }
 
-        $credential = $node->credentials[$name] ?? null;
+        $credential = $node->credentials()[$name] ?? null;
 
         if ($credential === null) {
             throw NodeNotConnectable::missingCredentials($node, $name);

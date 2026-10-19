@@ -10,16 +10,11 @@ return new class extends Migration
     {
         Schema::create('tenant_pbx_assignments', function (Blueprint $table) {
             $table->id();
-            // one primary PBX per tenant in the MVP
+            // one primary PBX per tenant in the MVP; many tenants per node
             $table->foreignUlid('tenant_id')->unique()->constrained()->cascadeOnDelete();
-            $table->foreignId('sip_node_id')->constrained()->restrictOnDelete();
-            // the tenant's numbers on the node; ranges of one node never overlap
-            $table->unsignedInteger('number_range_start');
-            $table->unsignedInteger('number_range_end');
+            $table->foreignId('pbx_node_id')->constrained()->restrictOnDelete();
             $table->string('status')->default('active');
             $table->timestamps();
-
-            $table->index(['sip_node_id', 'number_range_start']);
         });
     }
 

@@ -2,7 +2,7 @@
 
 namespace App\Modules\Telephony\Models;
 
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Tenancy\Concerns\BelongsToTenant;
 use Database\Factories\ExtensionFactory;
@@ -19,14 +19,14 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property string $tenant_id
- * @property int $sip_node_id
+ * @property int $pbx_node_id
  * @property string $extension_number
  * @property string $display_name
  * @property ExtensionStatus $status
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['tenant_id', 'sip_node_id', 'extension_number', 'display_name', 'status'])]
+#[Fillable(['tenant_id', 'pbx_node_id', 'extension_number', 'display_name', 'status'])]
 #[UseFactory(ExtensionFactory::class)]
 class Extension extends Model
 {
@@ -45,10 +45,10 @@ class Extension extends Model
     }
 
     /**
-     * @return BelongsTo<SipNode, $this>
+     * @return BelongsTo<PbxNode, $this>
      */
     public function node(): BelongsTo
     {
-        return $this->belongsTo(SipNode::class, 'sip_node_id');
+        return $this->belongsTo(PbxNode::class, 'pbx_node_id');
     }
 }

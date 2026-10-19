@@ -7,7 +7,8 @@ use App\Modules\Nodes\Actions\CheckNodeConnections;
 use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
@@ -19,7 +20,7 @@ class NodeController extends Controller
 {
     public function index(): Response
     {
-        Gate::authorize('viewAny', SipNode::class);
+        Gate::authorize('viewAny', PbxNode::class);
 
         return Inertia::render('admin/nodes/Index', [
             'deployerConfigured' => filled(config('services.sip_deployer.url')) && filled(config('services.sip_deployer.token')),
@@ -29,14 +30,14 @@ class NodeController extends Controller
                 ->get(['id', 'name'])
                 ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
             'assignmentStatuses' => AssignmentStatus::options(),
-            'nodes' => SipNode::query()
-                ->with(['assignments' => fn ($query) => $query->with('tenant:id,name,slug')->withCount('extensions')->orderBy('number_range_start')])
+            'nodes' => PbxNode::query()
+                ->with(['secrets', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug', 'numberRange'])->withCount('extensions')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
-                ->map(fn (SipNode $node): array => [
+                ->map(fn (PbxNode $node): array => [
                     'id' => $node->id,
-                    'deployer_id' => $node->deployer_id,
+                    'deployer_server_id' => $node->deployer_server_id,
                     'name' => $node->name,
                     'sip_domain' => $node->sip_domain,
                     'environment' => $node->environment,
@@ -46,26 +47,30 @@ class NodeController extends Controller
                     'opensips' => $node->services['opensips'] ?? null,
                     'asterisk' => $node->services['asterisk'] ?? null,
                     'endpoints' => array_keys($node->endpoints),
-                    'credentials' => array_keys($node->credentials ?? []),
+                    'credentials' => array_keys($node->credentials()),
                     'connection_checks' => $node->connection_checks,
                     'checked_at' => $node->checked_at?->toIso8601String(),
                     'synced_at' => $node->synced_at?->toIso8601String(),
                     'removed_at' => $node->removed_at?->toIso8601String(),
-                    'assignments' => $node->assignments->map(fn (TenantPbxAssignment $assignment): array => [
-                        'id' => $assignment->id,
-                        'tenant' => ['name' => $assignment->tenant->name, 'slug' => $assignment->tenant->slug],
-                        'number_range_start' => $assignment->number_range_start,
-                        'number_range_end' => $assignment->number_range_end,
-                        'status' => $assignment->status->value,
-                        'extensions_count' => $assignment->extensions_count,
-                    ]),
+                    'next_prefix' => TenantNumberRange::nextFreePrefix($node->id),
+                    'assignments' => $node->assignments
+                        ->sortBy(fn (TenantPbxAssignment $assignment): string => $assignment->numberRange->prefix ?? '')
+                        ->values()
+                        ->map(fn (TenantPbxAssignment $assignment): array => [
+                            'id' => $assignment->id,
+                            'tenant' => ['name' => $assignment->tenant->name, 'slug' => $assignment->tenant->slug],
+                            'prefix' => $assignment->numberRange?->prefix,
+                            'numbers' => $assignment->numberRange?->label(),
+                            'status' => $assignment->status->value,
+                            'extensions_count' => $assignment->extensions_count,
+                        ]),
                 ]),
         ]);
     }
 
     public function sync(SyncNodes $syncNodes): RedirectResponse
     {
-        Gate::authorize('sync', SipNode::class);
+        Gate::authorize('sync', PbxNode::class);
 
         try {
             $result = $syncNodes->handle();
@@ -86,7 +91,7 @@ class NodeController extends Controller
         return redirect()->route('admin.nodes.index');
     }
 
-    public function check(SipNode $node, CheckNodeConnections $checkConnections): RedirectResponse
+    public function check(PbxNode $node, CheckNodeConnections $checkConnections): RedirectResponse
     {
         Gate::authorize('check', $node);
 

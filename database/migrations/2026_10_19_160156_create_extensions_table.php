@@ -12,14 +12,14 @@ return new class extends Migration
             $table->id();
             $table->foreignUlid('tenant_id')->constrained()->cascadeOnDelete();
             // the node the number lives on; every tenant on a node shares its SIP domain and dialplan
-            $table->foreignId('sip_node_id')->constrained()->restrictOnDelete();
+            $table->foreignId('pbx_node_id')->constrained()->restrictOnDelete();
             $table->string('extension_number', 10);
             $table->string('display_name');
             $table->string('status')->default('active');
             $table->timestamps();
 
             $table->unique(['tenant_id', 'extension_number']);
-            $table->unique(['sip_node_id', 'extension_number']);
+            $table->unique(['pbx_node_id', 'extension_number']);
         });
     }
 

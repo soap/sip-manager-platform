@@ -3,9 +3,12 @@
 namespace App\Modules\Nodes\Actions;
 
 use App\Modules\Audit\Audit;
+use App\Modules\Nodes\Enums\NodeSecretKind;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
-use App\Modules\Nodes\Models\SipNode;
+use App\Modules\Nodes\Models\NodeSecret;
+use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\SipDeployer;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -35,7 +38,7 @@ class SyncNodes
             $deployerId = (int) ($manifest['id'] ?? 0);
 
             if ($deployerId === 0 || ! in_array($manifest['manifest_version'] ?? null, self::SUPPORTED_MANIFEST_VERSIONS, true)) {
-                Log::warning('Skipped a SIP Deployer node with an unsupported manifest.', ['deployer_id' => $deployerId, 'manifest_version' => $manifest['manifest_version'] ?? null]);
+                Log::warning('Skipped a SIP Deployer node with an unsupported manifest.', ['deployer_server_id' => $deployerId, 'manifest_version' => $manifest['manifest_version'] ?? null]);
                 $result['skipped'][] = $deployerId;
 
                 continue;
@@ -47,7 +50,7 @@ class SyncNodes
 
             if ($node->wasRecentlyCreated) {
                 $result['added']++;
-                $this->audit->record('node.added', $node, ['name' => $node->name, 'deployer_id' => $deployerId]);
+                $this->audit->record('node.added', $node, ['name' => $node->name, 'deployer_server_id' => $deployerId]);
             }
 
             try {
@@ -60,10 +63,10 @@ class SyncNodes
             }
         }
 
-        SipNode::query()->listed()->whereNotIn('deployer_id', $listed)->get()->each(function (SipNode $node) use (&$result): void {
+        PbxNode::query()->listed()->whereNotIn('deployer_server_id', $listed)->get()->each(function (PbxNode $node) use (&$result): void {
             $node->update(['removed_at' => now()]);
             $result['removed']++;
-            $this->audit->record('node.removed', $node, ['name' => $node->name, 'deployer_id' => $node->deployer_id]);
+            $this->audit->record('node.removed', $node, ['name' => $node->name, 'deployer_server_id' => $node->deployer_server_id]);
         });
 
         return $result;
@@ -72,9 +75,9 @@ class SyncNodes
     /**
      * @param  array<string, mixed>  $manifest
      */
-    private function store(int $deployerId, array $manifest): SipNode
+    private function store(int $deployerId, array $manifest): PbxNode
     {
-        return SipNode::query()->updateOrCreate(['deployer_id' => $deployerId], [
+        return PbxNode::query()->updateOrCreate(['deployer_server_id' => $deployerId], [
             'manifest_version' => $manifest['manifest_version'],
             'name' => $manifest['name'] ?? "node-{$deployerId}",
             'hostname' => $manifest['hostname'] ?? null,
@@ -92,34 +95,54 @@ class SyncNodes
     }
 
     /**
-     * Whether new credentials were stored.
+     * Whether new secrets were stored. A secret whose password changed is marked rotated; an
+     * endpoint the node no longer has loses its secret.
      */
-    private function refreshCredentials(SipNode $node, mixed $version): bool
+    private function refreshCredentials(PbxNode $node, mixed $version): bool
     {
         if ($version === null) {
-            if ($node->credentials !== null) {
-                $node->update(['credentials' => null, 'credentials_version' => null]);
+            if ($node->secrets()->exists() || $node->credentials_version !== null) {
+                DB::transaction(function () use ($node): void {
+                    $node->secrets()->delete();
+                    $node->update(['credentials_version' => null]);
+                });
             }
 
             return false;
         }
 
-        if ($version === $node->credentials_version && $node->credentials !== null) {
+        if ($version === $node->credentials_version && $node->secrets()->exists()) {
             return false;
         }
 
-        $fetched = $this->deployer->credentials($node->deployer_id);
-        $credentials = array_filter(
-            $fetched,
-            fn (mixed $credential): bool => is_array($credential) && isset($credential['username'], $credential['password']),
-        );
+        $fetched = $this->deployer->credentials($node->deployer_server_id);
+        $credentials = collect(NodeSecretKind::cases())
+            ->mapWithKeys(fn (NodeSecretKind $kind): array => [$kind->value => $fetched[$kind->value] ?? null])
+            ->filter(fn (mixed $credential): bool => is_array($credential) && is_string($credential['username'] ?? null) && is_string($credential['password'] ?? null));
 
-        $node->update([
-            'credentials' => $credentials,
-            'credentials_version' => is_string($fetched['credentials_version'] ?? null) ? $fetched['credentials_version'] : (string) $version,
-        ]);
+        DB::transaction(function () use ($node, $credentials, $fetched, $version): void {
+            $existing = $node->secrets()->get()->keyBy(fn (NodeSecret $secret): string => $secret->kind->value);
 
-        $this->audit->record('node.credentials_updated', $node, ['name' => $node->name, 'endpoints' => array_keys($credentials)]);
+            foreach ($credentials as $kind => $credential) {
+                $current = $existing->get($kind);
+
+                $node->secrets()->updateOrCreate(['kind' => $kind], [
+                    'username' => $credential['username'],
+                    'secret' => $credential['password'],
+                    'fetched_at' => now(),
+                    'rotated_at' => $current !== null && $current->secret !== $credential['password'] ? now() : $current?->rotated_at,
+                ]);
+            }
+
+            $node->secrets()->whereNotIn('kind', $credentials->keys()->all())->delete();
+            $node->update([
+                'credentials_version' => is_string($fetched['credentials_version'] ?? null) ? $fetched['credentials_version'] : (string) $version,
+            ]);
+        });
+
+        $node->unsetRelation('secrets');
+
+        $this->audit->record('node.credentials_updated', $node, ['name' => $node->name, 'endpoints' => $credentials->keys()->all()]);
 
         return true;
     }

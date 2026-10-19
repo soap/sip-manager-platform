@@ -3,6 +3,7 @@
 namespace App\Modules\Tenancy\Models;
 
 use App\Models\User;
+use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Enums\TenantStatus;
 use App\Modules\Tenancy\Policies\TenantPolicy;
@@ -59,13 +60,23 @@ class Tenant extends Model
     }
 
     /**
-     * The tenant's primary PBX node and its block of numbers there.
+     * The tenant's primary PBX node.
      *
      * @return HasOne<TenantPbxAssignment, $this>
      */
     public function pbxAssignment(): HasOne
     {
         return $this->hasOne(TenantPbxAssignment::class);
+    }
+
+    /**
+     * The tenant's prefix on its node: its numbers are the prefix followed by three digits.
+     *
+     * @return HasOne<TenantNumberRange, $this>
+     */
+    public function numberRange(): HasOne
+    {
+        return $this->hasOne(TenantNumberRange::class);
     }
 
     public function isActive(): bool

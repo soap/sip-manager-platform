@@ -8,10 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('sip_nodes', function (Blueprint $table) {
+        Schema::create('pbx_nodes', function (Blueprint $table) {
             $table->id();
             // the server id in SIP Deployer, which owns the node; everything else here is a copy of its manifest
-            $table->unsignedBigInteger('deployer_id')->unique();
+            $table->unsignedBigInteger('deployer_server_id')->unique();
             $table->unsignedInteger('manifest_version');
             $table->string('name');
             $table->string('hostname')->nullable();
@@ -23,7 +23,6 @@ return new class extends Migration
             $table->json('services');
             $table->json('endpoints');
             $table->json('dialplan')->nullable();
-            $table->text('credentials')->nullable();
             $table->string('credentials_version', 64)->nullable();
             $table->json('connection_checks')->nullable();
             $table->timestamp('checked_at')->nullable();
@@ -35,6 +34,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('sip_nodes');
+        Schema::dropIfExists('pbx_nodes');
     }
 };
