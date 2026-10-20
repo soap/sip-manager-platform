@@ -3,6 +3,7 @@
 namespace App\Modules\Telephony\Models;
 
 use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Tenancy\Concerns\BelongsToTenant;
 use Database\Factories\ExtensionFactory;
@@ -102,6 +103,16 @@ class Extension extends Model
     public function dialNumber(): MorphOne
     {
         return $this->morphOne(DialNumber::class, 'owner')->withoutGlobalScope(DialNumber::TENANT_SCOPE);
+    }
+
+    /**
+     * The newest provisioning operation of this extension: whether the node has it yet.
+     *
+     * @return MorphOne<ProvisioningOperation, $this>
+     */
+    public function latestOperation(): MorphOne
+    {
+        return $this->morphOne(ProvisioningOperation::class, 'aggregate')->latestOfMany('id');
     }
 
     public function isActive(): bool

@@ -2,13 +2,17 @@
 
 namespace App\Modules\Telephony\Http\Requests;
 
+use App\Modules\Tenancy\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreExtensionRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->can('manageExtensions', $this->route('tenant')) ?? false;
+        // the tenant of the page or of the API token
+        $tenant = app(TenantContext::class)->tenant();
+
+        return $tenant !== null && ($this->user()?->can('manageExtensions', $tenant) ?? false);
     }
 
     /**

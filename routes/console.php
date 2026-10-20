@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\IdempotencyKey;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -10,3 +11,4 @@ Artisan::command('inspire', function () {
 
 Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping();
+Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();

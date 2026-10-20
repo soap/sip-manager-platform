@@ -31,3 +31,20 @@ export type AuditEntry = {
     ip_address: string | null;
     created_at: string;
 };
+
+export type ApiAbility = 'read' | 'write';
+
+export type ApiAbilityOption = {
+    value: ApiAbility;
+    label: string;
+};
+
+export type ApiTokenSummary = {
+    id: number;
+    name: string;
+    abilities: ApiAbility[];
+    user: string | null;
+    last_used_at: string | null;
+    expires_at: string | null;
+    created_at: string | null;
+};

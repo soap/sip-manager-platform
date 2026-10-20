@@ -3,7 +3,6 @@
 namespace App\Modules\Telephony\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Provisioning\Compiler\NumberCompiler;
 use App\Modules\Provisioning\LatestOperations;
 use App\Modules\Provisioning\ProvisioningHealth;
@@ -34,7 +33,7 @@ class ExtensionController extends Controller
                 'numbers' => $assignment->numberRange->label(),
                 'status' => $assignment->status->value,
                 'voicemail' => $assignment->node->hasVoicemail(),
-                'server' => $this->sipServer($assignment->node),
+                'server' => $assignment->node->sipServer(),
             ],
             'extensions' => $list->map(fn (Extension $extension): array => [
                 'id' => $extension->id,
@@ -151,7 +150,7 @@ class ExtensionController extends Controller
             'extension_number' => $extension->extension_number,
             'username' => $extension->extension_number,
             'password' => $password,
-            ...$this->sipServer($extension->node),
+            ...$extension->node->sipServer(),
         ]);
     }
 
@@ -165,19 +164,5 @@ class ExtensionController extends Controller
             'pin' => $pin,
             'feature_code' => NumberCompiler::VOICEMAIL_MAIN_EXTEN,
         ]);
-    }
-
-    /**
-     * Where a phone registers: the node's SIP domain (also the realm) and port.
-     *
-     * @return array{domain: string|null, port: int, transports: list<string>}
-     */
-    private function sipServer(PbxNode $node): array
-    {
-        return [
-            'domain' => $node->sip_domain,
-            'port' => (int) ($node->services['opensips']['sip_port'] ?? 5060),
-            'transports' => array_values($node->services['opensips']['transports'] ?? ['udp']),
-        ];
     }
 }

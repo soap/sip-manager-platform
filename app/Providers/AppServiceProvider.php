@@ -4,14 +4,19 @@ namespace App\Providers;
 
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
+use App\Modules\Tenancy\Models\ApiToken;
 use App\Modules\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\DevCommands;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -36,7 +41,20 @@ class AppServiceProvider extends ServiceProvider
             RingGroup::MORPH => RingGroup::class,
         ]);
 
+        Sanctum::usePersonalAccessTokenModel(ApiToken::class);
+
+        $this->configureRateLimiting();
         $this->configureDevCommands();
+    }
+
+    /**
+     * The tenant API: per token, so one client cannot use up another's allowance.
+     */
+    protected function configureRateLimiting(): void
+    {
+        RateLimiter::for('api', fn (Request $request): Limit => Limit::perMinute(120)->by(
+            $request->user()?->currentAccessToken()?->getKey() ?? $request->ip(),
+        ));
     }
 
     /**

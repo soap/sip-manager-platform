@@ -348,5 +348,16 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - **ข้อจำกัด:** ตราบที่ node ยังเปิด `direct_dial` (`_X.`) priority 1 ของเบอร์ใดก็ "มี" เสมอ — extension ที่ปิด (มีแค่ `Goto(denied,1)`) จึงยืนยันได้ไม่จริงจนกว่าจะปิด direct_dial
 - 198 tests ผ่าน, Larastan ผ่าน
 
+### API v1 (20 ต.ค. 2026, ยังไม่ commit)
+- **API tokens** (หน้า `/t/{slug}/api-tokens`, owner/admin): Sanctum token ของ user ผูกกับ tenant เดียว (`personal_access_tokens.tenant_id`, model `ApiToken`); สิทธิ์ `read` หรือ `read+write`; หมดอายุ 30/90/365 วัน หรือไม่หมด; แสดง token ครั้งเดียว เก็บแค่ hash; revoke ได้; เอาสมาชิกออก = ลบ token ของเขาใน tenant นั้น; audit `api_token.created/revoked`
+- คำขอ API ทำในนาม user ของ token ด้วย role ณ ตอนนั้น (member ที่ถือ write token ก็เขียนไม่ได้); tenant มาจาก token เท่านั้น (`SetApiTenant`): token ไม่มี tenant / user ไม่ได้เป็นสมาชิกแล้ว / tenant suspended = 403; Sanctum `guard => []` (ไม่รับ session ของหน้าเว็บ)
+- Endpoints `/api/v1`: `GET tenant`, `GET|POST extensions` (paginate `per_page` ≤ 100, filter `status`), `GET|PATCH|DELETE extensions/{id}`, `POST extensions/{id}/rotate-credential`, `GET operations/{id}`; การเปลี่ยนที่ไปถึง PBX ตอบ `202` + `operation_id`; `sip_credential` (username, password, domain, port, transports) อยู่ในคำตอบของ create/rotate เท่านั้น
+- PATCH: ต้องส่ง `version` หรือ `If-Match` (ETag ของ GET) ไม่ส่ง = 428, version ไม่ตรง = 409 (พร้อมข้อมูลล่าสุด); เปลี่ยนชื่ออย่างเดียว = 200 ไม่ provision
+- **Idempotency-Key** บน POST (`idempotency_keys`: tenant, key, request_hash, response; เก็บ 24 ชม., `model:prune` รายวัน): ซ้ำ = คำตอบเดิม + `Idempotent-Replayed: true` โดย password เป็น `[redacted]` (แสดงครั้งเดียวจริง); key เดิมกับ body อื่น = 422; คำขอแรกยังทำอยู่ = 409; คำขอที่ล้มเหลวไม่จำ key
+- Rate limit 120/นาทีต่อ token, rotate 10/นาที
+- `StaleVersion` (extends ValidationException) ใช้กับ extension และ ring group
+- 214 tests ผ่าน, Larastan, vue-tsc, `vp check` ผ่าน
+- ยังไม่ทำ: voicemail/reapply/ring group ใน API, `POST extensions/{id}/devices` และ `GET call-records` (ยังไม่มี devices/CDR), หน้า Operations
+
 ### ถัดไป
-API v1 (M5)
+ปิด `direct_dial` บน node lab (SIP Deployer) → ทดสอบ P0 ของ M5 (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations

@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Tenancy\Http\Controllers\Admin\TenantController;
+use App\Modules\Tenancy\Http\Controllers\ApiTokenController;
 use App\Modules\Tenancy\Http\Controllers\AuditLogController;
 use App\Modules\Tenancy\Http\Controllers\MemberController;
 use App\Modules\Tenancy\Http\Controllers\TenantDashboardController;
@@ -23,5 +24,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('members/{membership}', [MemberController::class, 'destroy'])->whereNumber('membership')->name('members.destroy');
 
         Route::get('audit-log', [AuditLogController::class, 'index'])->name('audit-log.index');
+
+        Route::get('api-tokens', [ApiTokenController::class, 'index'])->name('api-tokens.index');
+        Route::post('api-tokens', [ApiTokenController::class, 'store'])->middleware('throttle:10,1')->name('api-tokens.store');
+        Route::delete('api-tokens/{token}', [ApiTokenController::class, 'destroy'])->whereNumber('token')->name('api-tokens.destroy');
     });
 });

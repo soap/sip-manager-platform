@@ -13,10 +13,16 @@ use Illuminate\Validation\ValidationException;
 /**
  * Adds, changes and removes members of the tenant in the context. Only owners (and platform
  * admins) hand out or take away the owner role, and a tenant always keeps at least one owner.
+ * A removed member's API tokens of the tenant are revoked with the membership.
  */
 class ManageMembers
 {
-    public function __construct(private InviteUser $invite, private Audit $audit, private TenantContext $context) {}
+    public function __construct(
+        private InviteUser $invite,
+        private Audit $audit,
+        private TenantContext $context,
+        private ManageApiTokens $apiTokens,
+    ) {}
 
     public function add(User $actor, string $name, string $email, TenantRole $role): TenantMembership
     {
@@ -58,7 +64,10 @@ class ManageMembers
         $this->ensureMayGrant($actor, $membership->role, 'member');
         $this->ensureAnotherOwnerRemains($membership, 'member');
 
-        $membership->delete();
+        DB::transaction(function () use ($membership): void {
+            $membership->delete();
+            $this->apiTokens->revokeAllOf($membership->user);
+        });
 
         $this->audit->record('member.removed', $membership, ['email' => $membership->user->email, 'role' => $membership->role->value]);
     }

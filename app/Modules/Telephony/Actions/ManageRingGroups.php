@@ -9,6 +9,7 @@ use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Enums\FailoverType;
 use App\Modules\Telephony\Enums\RingStrategy;
+use App\Modules\Telephony\Exceptions\StaleVersion;
 use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
@@ -102,7 +103,7 @@ class ManageRingGroups
                 ]);
 
             if ($updated === 0) {
-                throw ValidationException::withMessages(['ring_group' => 'Someone else changed this ring group. Reload and try again.']);
+                throw StaleVersion::of('ring_group', 'ring group');
             }
 
             $group->refresh();

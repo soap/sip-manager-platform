@@ -40,7 +40,8 @@ return [
     |
     */
 
-    'guard' => ['web'],
+    // the tenant API takes API tokens only, never the session of the web pages
+    'guard' => [],
 
     /*
     |--------------------------------------------------------------------------

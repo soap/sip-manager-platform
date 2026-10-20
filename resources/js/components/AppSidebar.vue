@@ -2,6 +2,7 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import {
     Building2,
+    KeyRound,
     Phone,
     PhoneForwarded,
     LayoutGrid,
@@ -27,6 +28,7 @@ import { dashboard } from '@/routes';
 import { index as adminNodes } from '@/routes/admin/nodes';
 import { index as adminTenants } from '@/routes/admin/tenants';
 import { dashboard as tenantDashboard } from '@/routes/tenant';
+import { index as apiTokens } from '@/routes/tenant/api-tokens';
 import { index as auditLog } from '@/routes/tenant/audit-log';
 import { index as extensions } from '@/routes/tenant/extensions';
 import { index as ringGroups } from '@/routes/tenant/ring-groups';
@@ -79,6 +81,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
         },
         ...(tenant.canManageMembers
             ? [
+                  {
+                      title: 'API tokens',
+                      href: apiTokens({ tenant: tenant.slug }),
+                      icon: KeyRound,
+                  },
                   {
                       title: 'Audit log',
                       href: auditLog({ tenant: tenant.slug }),

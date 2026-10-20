@@ -38,6 +38,14 @@ class TenantPolicy
         return $this->manageMembers($user, $tenant);
     }
 
+    /**
+     * API tokens act with the role of the user who issued them, so the same people as members.
+     */
+    public function manageApiTokens(User $user, Tenant $tenant): bool
+    {
+        return $this->manageMembers($user, $tenant);
+    }
+
     public function viewAuditLog(User $user, Tenant $tenant): bool
     {
         return $this->manageMembers($user, $tenant);

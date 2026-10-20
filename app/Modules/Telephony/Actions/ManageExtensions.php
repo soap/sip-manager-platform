@@ -7,6 +7,7 @@ use App\Modules\Provisioning\Actions\RequestProvisioning;
 use App\Modules\Provisioning\Enums\OperationType;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Telephony\Enums\ExtensionStatus;
+use App\Modules\Telephony\Exceptions\StaleVersion;
 use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\SipCredential;
@@ -76,29 +77,35 @@ class ManageExtensions
     /**
      * Renames or enables/disables. With a version, refuses a change made against an older copy of
      * the extension (optimistic lock).
+     *
+     * @return ProvisioningOperation|null the operation when the node has to change (a new status)
+     *
+     * @throws StaleVersion
      */
-    public function update(Extension $extension, string $displayName, ExtensionStatus $status, ?int $expectedVersion = null): void
+    public function update(Extension $extension, string $displayName, ExtensionStatus $status, ?int $expectedVersion = null): ?ProvisioningOperation
     {
         $before = ['display_name' => $extension->display_name, 'status' => $extension->status->value];
 
         if ($before === ['display_name' => $displayName, 'status' => $status->value]) {
-            return;
+            return null;
         }
 
-        DB::transaction(function () use ($extension, $displayName, $status, $expectedVersion, $before): void {
+        return DB::transaction(function () use ($extension, $displayName, $status, $expectedVersion, $before): ?ProvisioningOperation {
+            $operation = null;
+
             $updated = Extension::query()
                 ->whereKey($extension->id)
                 ->when($expectedVersion !== null, fn ($query) => $query->where('version', $expectedVersion))
                 ->update(['display_name' => $displayName, 'status' => $status, 'version' => DB::raw('version + 1'), 'updated_at' => now()]);
 
             if ($updated === 0) {
-                throw ValidationException::withMessages(['extension' => 'Someone else changed this extension. Reload and try again.']);
+                throw StaleVersion::of('extension', 'extension');
             }
 
             $extension->refresh();
 
             if ($before['status'] !== $status->value) {
-                $this->provision($extension, OperationType::ExtensionUpdated);
+                $operation = $this->provision($extension, OperationType::ExtensionUpdated);
                 // ring groups skip disabled members
                 $this->ringGroups->extensionChanged($extension, deleted: false);
             }
@@ -108,12 +115,14 @@ class ManageExtensions
                 'from' => $before,
                 'to' => ['display_name' => $displayName, 'status' => $status->value],
             ]);
+
+            return $operation;
         });
     }
 
-    public function delete(Extension $extension): void
+    public function delete(Extension $extension): ProvisioningOperation
     {
-        DB::transaction(function () use ($extension): void {
+        return DB::transaction(function () use ($extension): ProvisioningOperation {
             // before the delete, while its memberships still point at the groups
             $this->ringGroups->extensionChanged($extension, deleted: true);
 
@@ -121,9 +130,11 @@ class ManageExtensions
             $extension->delete();
 
             // the number is free now, so the node loses its subscriber and dialplan
-            $this->provision($extension, OperationType::ExtensionDeleted);
+            $operation = $this->provision($extension, OperationType::ExtensionDeleted);
 
             $this->audit->record('extension.deleted', $extension, ['number' => $extension->extension_number, 'display_name' => $extension->display_name]);
+
+            return $operation;
         });
     }
 

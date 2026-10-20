@@ -137,4 +137,18 @@ class PbxNode extends Model
     {
         return array_values($this->services['asterisk']['features'] ?? []);
     }
+
+    /**
+     * Where a phone registers: the node's SIP domain (also the realm) and port.
+     *
+     * @return array{domain: string|null, port: int, transports: list<string>}
+     */
+    public function sipServer(): array
+    {
+        return [
+            'domain' => $this->sip_domain,
+            'port' => (int) ($this->services['opensips']['sip_port'] ?? 5060),
+            'transports' => array_values($this->services['opensips']['transports'] ?? ['udp']),
+        ];
+    }
 }
