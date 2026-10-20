@@ -345,7 +345,7 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - `AmiAdapter`: `version()` (CoreSettings — ใช้ในทดสอบการเชื่อมต่อแทน `AmiLogin` เดิม), `missingPriorities()`, `hasMailbox()` — login ครั้งละคำถามแล้ว logoff
 - `ApplyRevision` หลังเทียบ checksum: ถาม Asterisk ว่าเห็นทุก priority ของเบอร์ และ mailbox (ถ้าเปิด voicemail); ไม่เห็น = `read_back_mismatch` (retry); node ที่ไม่มี endpoint `ami` ข้าม; `apply_result.asterisk` = `confirmed` / `unchecked`
 - ทดสอบกับ node lab: Asterisk 22.11.0, 20101 เห็น priority 1–4, `20101@t20` มี mailbox
-- **ข้อจำกัด:** ตราบที่ node ยังเปิด `direct_dial` (`_X.`) priority 1 ของเบอร์ใดก็ "มี" เสมอ — extension ที่ปิด (มีแค่ `Goto(denied,1)`) จึงยืนยันได้ไม่จริงจนกว่าจะปิด direct_dial
+- ~~**ข้อจำกัด:** ตราบที่ node ยังเปิด `direct_dial` (`_X.`) priority 1 ของเบอร์ใดก็ "มี" เสมอ~~ — ปิด direct_dial บน node lab แล้ว (ดูด้านล่าง)
 - 198 tests ผ่าน, Larastan ผ่าน
 
 ### API v1 (20 ต.ค. 2026, ยังไม่ commit)
@@ -359,5 +359,9 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - 214 tests ผ่าน, Larastan, vue-tsc, `vp check` ผ่าน
 - ยังไม่ทำ: voicemail/reapply/ring group ใน API, `POST extensions/{id}/devices` และ `GET call-records` (ยังไม่มี devices/CDR), หน้า Operations
 
+### ปิด direct_dial บน node lab (20 ต.ค. 2026)
+- SIP Deployer → Reinstall Asterisk ของ `sip-server-test-02` (run 12) ด้วย features `ami, ari, realtime, voicemail, queues` — ไม่ compile ใหม่ (22.11.0 build อยู่แล้ว), DB/รหัสผ่านคงเดิม, Asterisk restart สั้นๆ; `nodes:sync` แล้ว manifest ไม่มี `direct_dial`
+- ตรวจผ่าน AMI: เบอร์ที่ไม่มีแถว (29999) ไม่พบ priority 1 แล้ว, 20101 เห็น priority 1–4, `denied` เห็นครบ — เบอร์ที่ไม่มี dialplan ใน `managed` โทรไม่ติดอีกต่อไป
+
 ### ถัดไป
-ปิด `direct_dial` บน node lab (SIP Deployer) → ทดสอบ P0 ของ M5 (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations
+ทดสอบ P0 ของ M5 (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations
