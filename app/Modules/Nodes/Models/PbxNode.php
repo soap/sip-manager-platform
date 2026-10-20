@@ -123,6 +123,14 @@ class PbxNode extends Model
     }
 
     /**
+     * Whether Asterisk on the node keeps voicemail boxes in its realtime database.
+     */
+    public function hasVoicemail(): bool
+    {
+        return in_array('voicemail', $this->asteriskFeatures(), true);
+    }
+
+    /**
      * @return list<string>
      */
     public function asteriskFeatures(): array

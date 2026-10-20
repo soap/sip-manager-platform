@@ -92,6 +92,12 @@ const failoverOptions = computed(() => [
         value: `extension:${extension.id}`,
         label: `Extension ${extension.number} · ${extension.name}`,
     })),
+    ...props.options.extensions
+        .filter((extension) => extension.voicemail)
+        .map((extension) => ({
+            value: `voicemail:${extension.id}`,
+            label: `Voicemail of ${extension.number} · ${extension.name}`,
+        })),
     ...props.options.failoverGroups.map((group) => ({
         value: `ring_group:${group.id}`,
         label: `Ring group ${group.number} · ${group.name}`,

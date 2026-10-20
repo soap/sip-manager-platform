@@ -330,5 +330,14 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 
 - คำเตือนเมื่อการเปลี่ยนแปลงค้างเกิน 30 วินาที (`ProvisioningHealth`): แยก relay/scheduler กับ queue worker; platform admin เห็นคำสั่งที่ต้องรัน, ผู้ใช้ tenant เห็นข้อความทั่วไป
 
+- **Ring group ทดสอบด้วยโทรศัพท์แล้ว** (20 ต.ค. 2026)
+
+### Voicemail (20 ต.ค. 2026, ยังไม่ commit)
+- `extensions.voicemail_enabled` + `voicemail_pin` (6 หลัก, encrypted; แสดงครั้งเดียวตอนเปิด/ตั้งใหม่ เหมือนรหัส SIP) — เปิดได้เฉพาะ node ที่มี feature `voicemail`
+- Compile ตาม §6.2: แถว `asterisk.voicemail` (context `t<prefix>`, mailbox = เบอร์, password = PIN, fullname = ชื่อ extension); dialplan หลัง Dial = `VoiceMail(<n>@t<prefix>,${IF($["${DIALSTATUS}" = "BUSY"]?b:u)})` แล้ว `Hangup()`; feature code ร่วม `*97` = `VoiceMailMain(${CALLERID(num)}@t${CALLERID(num):0:2})` เขียนทุกครั้งที่ apply (เหมือน `denied`); extension ที่ปิด/ลบ/tenant suspended = ลบแถว voicemail (ไฟล์ข้อความบน node ยังอยู่); read-back รวมแถว voicemail
+- Ring group failover = `voicemail` (กล่องของ extension ที่เปิด voicemail) → `VoiceMail(<n>@t<prefix>,u)`; ปิด voicemail/ลบ extension = recompile กลุ่ม (กลับเป็น Hangup)
+- ทดสอบบน node lab: 20101–20103 มี mailbox, `*97` และ dialplan ถูกต้อง (`applied`); **ทดสอบด้วยโทรศัพท์แล้ว** — ฝากข้อความ, `*97` + PIN, ฟัง/ลบข้อความได้ (DTMF แบบ RFC2833 ผ่าน rtpengine ถึง Asterisk ปกติ; โทรศัพท์ต้องตั้ง DTMF เป็น RFC2833 เพราะ endpoint `opensips` เป็น `dtmf_mode = rfc4733`)
+- ข้อจำกัด: (1) PIN ที่เปลี่ยนจากเมนู `*97` จะถูกเขียนทับด้วย PIN ในระบบเมื่อ apply extension ครั้งถัดไป; (2) ไฟไฟข้อความ (MWI) ยังไม่ทำงาน เพราะโทรศัพท์ register ที่ OpenSIPS ไม่ใช่ Asterisk — ต้องให้ SIP Deployer ตั้ง MWI ผ่าน OpenSIPS หรือ subscribe; (3) voicemail-to-email ยังไม่มี (node ไม่มี MTA)
+
 ### ถัดไป
-ทดสอบ ring group ด้วยโทรศัพท์ → voicemail → AmiClient + read-back ผ่าน AMI → API v1 (M5)
+AmiClient + read-back ผ่าน AMI → API v1 (M5)

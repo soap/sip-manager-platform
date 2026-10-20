@@ -55,6 +55,43 @@ class RealtimeAdapter
     }
 
     /**
+     * Makes the mailbox's voicemail row exactly the given one, or removes it for null; app_voicemail
+     * reads the table on every lookup. Recorded messages stay on disk either way.
+     *
+     * @param  array{context: string, mailbox: string, password: string, fullname: string}|null  $box
+     */
+    public function replaceMailbox(PbxNode $node, string $mailbox, ?array $box): void
+    {
+        $database = $this->connections->asteriskDatabase($node);
+
+        $database->transaction(function () use ($database, $mailbox, $box): void {
+            $database->table('voicemail')->where('mailbox', $mailbox)->delete();
+
+            if ($box !== null) {
+                $database->table('voicemail')->insert($box);
+            }
+        });
+    }
+
+    /**
+     * @return array{context: string, mailbox: string, password: string, fullname: string}|null
+     */
+    public function mailbox(PbxNode $node, string $mailbox): ?array
+    {
+        $row = $this->connections->asteriskDatabase($node)
+            ->table('voicemail')
+            ->where('mailbox', $mailbox)
+            ->first(['context', 'mailbox', 'password', 'fullname']);
+
+        return $row === null ? null : [
+            'context' => (string) $row->context,
+            'mailbox' => (string) $row->mailbox,
+            'password' => (string) $row->password,
+            'fullname' => (string) $row->fullname,
+        ];
+    }
+
+    /**
      * The realtime context of the node's manifest (dialplan.managed_context), "managed" by default.
      */
     public function context(PbxNode $node): string

@@ -24,10 +24,10 @@ class RingGroupDependents
             ->where('tenant_id', $extension->tenant_id)
             ->where(fn ($query) => $query
                 ->whereHas('members', fn ($members) => $members->whereKey($extension->id))
-                ->orWhere(fn ($failover) => $failover->where('failover_type', FailoverType::Extension)->where('failover_id', $extension->id)))
+                ->orWhere(fn ($failover) => $failover->whereIn('failover_type', [FailoverType::Extension, FailoverType::Voicemail])->where('failover_id', $extension->id)))
             ->get();
 
-        $this->reprovision($groups, $deleted ? FailoverType::Extension : null, $extension->id);
+        $this->reprovision($groups, $deleted ? [FailoverType::Extension, FailoverType::Voicemail] : [], $extension->id);
     }
 
     public function ringGroupDeleted(RingGroup $group): void
@@ -38,16 +38,17 @@ class RingGroupDependents
             ->where('failover_id', $group->id)
             ->get();
 
-        $this->reprovision($groups, FailoverType::RingGroup, $group->id);
+        $this->reprovision($groups, [FailoverType::RingGroup], $group->id);
     }
 
     /**
      * @param  Collection<int, RingGroup>  $groups
+     * @param  list<FailoverType>  $goneTypes  failovers that pointed at the deleted thing
      */
-    private function reprovision(Collection $groups, ?FailoverType $goneType, int $goneId): void
+    private function reprovision(Collection $groups, array $goneTypes, int $goneId): void
     {
         foreach ($groups as $group) {
-            if ($goneType !== null && $group->failover_type === $goneType && $group->failover_id === $goneId) {
+            if (in_array($group->failover_type, $goneTypes, true) && $group->failover_id === $goneId) {
                 $group->update(['failover_type' => FailoverType::Hangup, 'failover_id' => null, 'version' => $group->version + 1]);
             }
 

@@ -2,11 +2,7 @@
 
 use App\Models\User;
 use App\Modules\Audit\Models\AuditLog;
-use App\Modules\Infrastructure\Asterisk\RealtimeAdapter;
-use App\Modules\Infrastructure\OpenSips\OpenSipsDbAdapter;
-use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
-use App\Modules\Nodes\NodeConnections;
 use App\Modules\Provisioning\Actions\ApplyRevision;
 use App\Modules\Provisioning\Actions\RequestProvisioning;
 use App\Modules\Provisioning\Enums\OperationStatus;
@@ -20,119 +16,10 @@ use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Telephony\Models\SipCredential;
-use App\Modules\Tenancy\Enums\TenantRole;
-use App\Modules\Tenancy\Models\Tenant;
-use App\Modules\Tenancy\Models\TenantMembership;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
-
-/**
- * The node's two databases in memory: what the adapters would read and write on MariaDB.
- */
-class FakeNodeDatabases
-{
-    /** @var array<string, array{username: string, domain: string, ha1: string, ha1_sha256: string}> */
-    public array $subscribers = [];
-
-    /** @var array<string, list<array{priority: int, app: string, appdata: string}>> */
-    public array $extens = [];
-
-    public ?Throwable $failWith = null;
-
-    public bool $corruptReadBack = false;
-}
-
-/**
- * Swaps the adapters for ones backed by FakeNodeDatabases.
- */
-function fakeNode(): FakeNodeDatabases
-{
-    $store = new FakeNodeDatabases;
-    $connections = app(NodeConnections::class);
-
-    app()->instance(RealtimeAdapter::class, new class($connections, $store) extends RealtimeAdapter
-    {
-        public function __construct(NodeConnections $connections, private FakeNodeDatabases $store)
-        {
-            parent::__construct($connections);
-        }
-
-        public function replaceExten(PbxNode $node, string $exten, array $priorities): void
-        {
-            if ($this->store->failWith !== null) {
-                throw $this->store->failWith;
-            }
-
-            $this->store->extens[$exten] = $priorities;
-
-            if ($priorities === []) {
-                unset($this->store->extens[$exten]);
-            }
-        }
-
-        public function exten(PbxNode $node, string $exten): array
-        {
-            return $this->store->extens[$exten] ?? [];
-        }
-    });
-
-    app()->instance(OpenSipsDbAdapter::class, new class($connections, $store) extends OpenSipsDbAdapter
-    {
-        public function __construct(NodeConnections $connections, private FakeNodeDatabases $store)
-        {
-            parent::__construct($connections);
-        }
-
-        public function replaceSubscriber(PbxNode $node, string $username, ?array $subscriber): void
-        {
-            unset($this->store->subscribers[$username]);
-
-            if ($subscriber !== null) {
-                $this->store->subscribers[$username] = $subscriber;
-            }
-        }
-
-        public function subscribers(PbxNode $node, string $username): array
-        {
-            $row = $this->store->subscribers[$username] ?? null;
-
-            if ($row !== null && $this->store->corruptReadBack) {
-                $row['ha1'] = 'tampered';
-            }
-
-            return $row === null ? [] : [$row];
-        }
-    });
-
-    return $store;
-}
-
-/**
- * Applies every revision waiting in the outbox, as the relay and the queue worker would.
- */
-function applyPendingRevisions(): void
-{
-    OutboxMessage::query()->whereNull('dispatched_at')->orderBy('id')->get()->each(function (OutboxMessage $message): void {
-        app(ApplyRevision::class)->handle($message->payload['config_revision_id']);
-        $message->update(['dispatched_at' => now()]);
-    });
-}
-
-/**
- * The signed-in admin of a tenant with prefix 20 on a node.
- *
- * @return array{Tenant, TenantPbxAssignment}
- */
-function provisioningTenant(?TenantPbxAssignment $assignment = null): array
-{
-    $user = signIn();
-    $assignment ??= TenantPbxAssignment::factory()->prefix('20')->create();
-    TenantMembership::withoutTenantScope()->create(['tenant_id' => $assignment->tenant_id, 'user_id' => $user->id, 'role' => TenantRole::Admin]);
-
-    return [$assignment->tenant, $assignment];
-}
 
 it('creates an extension with a SIP account shown once and requests provisioning', function () {
     [$tenant, $assignment] = provisioningTenant();

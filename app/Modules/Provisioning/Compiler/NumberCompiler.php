@@ -27,8 +27,12 @@ use App\Modules\Tenancy\Models\Tenant;
  * another number of the tenant, or Hangup(). Dial only returns when nobody answered, so the next
  * row runs only for an unanswered call.
  *
- * Anything disabled, or of a suspended tenant or assignment, loses its subscriber and sends every
- * caller to denied. A number nobody owns gets no rows at all.
+ * With voicemail on, an extension also gets the box <number>@t<prefix> with its PIN, and an
+ * unanswered or busy call is left there (VoiceMail ... b or u) before Hangup(). Phones reach their
+ * own box with *97.
+ *
+ * Anything disabled, or of a suspended tenant or assignment, loses its subscriber and its box, and
+ * sends every caller to denied. A number nobody owns gets no rows at all.
  */
 class NumberCompiler
 {
@@ -37,6 +41,9 @@ class NumberCompiler
 
     /** Shared by every tenant: where refused calls go. */
     public const DENIED_EXTEN = 'denied';
+
+    /** Shared by every tenant: the feature code for one's own mailbox. */
+    public const VOICEMAIL_MAIN_EXTEN = '*97';
 
     /** The width of extensions.appdata in the Asterisk realtime schema. */
     public const MAX_APPDATA = 256;
@@ -97,6 +104,12 @@ class NumberCompiler
             throw ProvisioningRejected::because('missing_sip_domain', "Node {$node->name} has no SIP domain.");
         }
 
+        $voicemail = $extension->hasVoicemail();
+
+        if ($voicemail && ! $node->hasVoicemail()) {
+            throw ProvisioningRejected::because('node_capability', "Node {$node->name} has no voicemail; turn voicemail off for {$number}.");
+        }
+
         return new CompiledNumber($number, 'active', [
             'username' => $credential->sip_username,
             'domain' => $domain,
@@ -105,8 +118,34 @@ class NumberCompiler
         ], $this->numbered([
             $this->callerCheck($range),
             ['Dial', $this->dialString($node, [$number], self::RING_SECONDS)],
+            // a busy phone gets the busy greeting, anything else the unavailable one
+            ...($voicemail ? [['VoiceMail', $this->mailboxOf($extension).',${IF($["${DIALSTATUS}" = "BUSY"]?b:u)}']] : []),
             ['Hangup', ''],
-        ]));
+        ]), $voicemail ? [
+            'context' => $extension->voicemailContext(),
+            'mailbox' => $number,
+            'password' => (string) $extension->voicemail_pin,
+            'fullname' => $extension->display_name,
+        ] : null);
+    }
+
+    /**
+     * The shared feature code a phone dials to hear its own mailbox: the mailbox and context follow
+     * from the caller's number, so one row serves every tenant, and the PIN guards each box.
+     *
+     * @return list<array{priority: int, app: string, appdata: string}>
+     */
+    public function voicemailMain(): array
+    {
+        return [
+            ['priority' => 1, 'app' => 'VoiceMailMain', 'appdata' => '${CALLERID(num)}@t${CALLERID(num):0:2}'],
+            ['priority' => 2, 'app' => 'Hangup', 'appdata' => ''],
+        ];
+    }
+
+    private function mailboxOf(Extension $extension): string
+    {
+        return "{$extension->extension_number}@{$extension->voicemailContext()}";
     }
 
     private function ringGroup(PbxNode $node, RingGroup $group, TenantNumberRange $range): CompiledNumber
@@ -126,22 +165,34 @@ class NumberCompiler
         return new CompiledNumber($group->number, 'active', null, $this->numbered([
             $this->callerCheck($range),
             ...$dials,
-            $this->failover($group),
+            ...$this->failover($node, $group),
         ]));
     }
 
     /**
-     * @return array{0: string, 1: string}
+     * Goto another number of the tenant, leave a message in an extension's mailbox, or hang up
+     * when the target is gone or has no voicemail.
+     *
+     * @return list<array{0: string, 1: string}>
      */
-    private function failover(RingGroup $group): array
+    private function failover(PbxNode $node, RingGroup $group): array
     {
-        $target = match ($group->failover_type) {
-            FailoverType::Extension => Extension::withoutTenantScope()->where('tenant_id', $group->tenant_id)->find($group->failover_id)?->extension_number,
-            FailoverType::RingGroup => RingGroup::withoutTenantScope()->where('tenant_id', $group->tenant_id)->find($group->failover_id)?->number,
-            FailoverType::Hangup => null,
+        $extension = in_array($group->failover_type, [FailoverType::Extension, FailoverType::Voicemail], true)
+            ? Extension::withoutTenantScope()->where('tenant_id', $group->tenant_id)->find($group->failover_id)
+            : null;
+
+        $steps = match ($group->failover_type) {
+            FailoverType::Extension => $extension === null ? [] : [['Goto', "{$extension->extension_number},1"]],
+            FailoverType::RingGroup => ($target = RingGroup::withoutTenantScope()->where('tenant_id', $group->tenant_id)->find($group->failover_id)) === null
+                ? []
+                : [['Goto', "{$target->number},1"]],
+            FailoverType::Voicemail => $extension?->isActive() === true && $extension->hasVoicemail() && $node->hasVoicemail()
+                ? [['VoiceMail', $this->mailboxOf($extension).',u']]
+                : [],
+            FailoverType::Hangup => [],
         };
 
-        return $target === null ? ['Hangup', ''] : ['Goto', "{$target},1"];
+        return [...$steps, ...(($steps[0][0] ?? null) === 'Goto' ? [] : [['Hangup', '']])];
     }
 
     /**

@@ -84,7 +84,14 @@ class ApplyRevision
         $compiled = $this->compiler->compile($node, $number);
         $revision->update(['status' => RevisionStatus::Validated, 'validation_report' => ['ok' => true, 'state' => $compiled->state]]);
 
+        // shared rows every tenant relies on, written each time so a reinstalled node gets them back
         $this->asterisk->replaceExten($node, NumberCompiler::DENIED_EXTEN, $this->compiler->denied());
+
+        if ($node->hasVoicemail()) {
+            $this->asterisk->replaceExten($node, NumberCompiler::VOICEMAIL_MAIN_EXTEN, $this->compiler->voicemailMain());
+            $this->asterisk->replaceMailbox($node, $number, $compiled->voicemail);
+        }
+
         $this->asterisk->replaceExten($node, $number, $compiled->dialplan);
         $this->openSips->replaceSubscriber($node, $number, $compiled->subscriber);
 
@@ -93,6 +100,7 @@ class ApplyRevision
             $compiled->state,
             $this->openSips->subscribers($node, $number)[0] ?? null,
             $this->asterisk->exten($node, $number),
+            $node->hasVoicemail() ? $this->asterisk->mailbox($node, $number) : null,
         );
 
         if ($readBack->checksum() !== $compiled->checksum()) {

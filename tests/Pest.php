@@ -31,3 +31,5 @@ function signIn(?User $user = null): User
 
     return $user;
 }
+
+require_once __DIR__.'/Support/provisioning.php';

@@ -151,6 +151,56 @@ class ManageExtensions
     }
 
     /**
+     * Turns voicemail on (with a new PIN, shown once) or off. The PIN set here wins: a PIN changed
+     * from the phone's voicemail menu is put back on the next write of the extension.
+     *
+     * @return array{pin: string|null, operation: ProvisioningOperation}
+     */
+    public function setVoicemail(Extension $extension, bool $enabled): array
+    {
+        if ($enabled && ! $extension->node->hasVoicemail()) {
+            throw ValidationException::withMessages(['voicemail' => 'The PBX node of this tenant has no voicemail.']);
+        }
+
+        return DB::transaction(function () use ($extension, $enabled): array {
+            $pin = $enabled ? Extension::newVoicemailPin() : null;
+
+            $extension->update(['voicemail_enabled' => $enabled, 'voicemail_pin' => $pin, 'version' => $extension->version + 1]);
+
+            $operation = $this->provision($extension, OperationType::ExtensionUpdated);
+            // ring groups may leave messages in this box
+            $this->ringGroups->extensionChanged($extension, deleted: false);
+
+            $this->audit->record($enabled ? 'extension.voicemail_enabled' : 'extension.voicemail_disabled', $extension, ['number' => $extension->extension_number]);
+
+            return ['pin' => $pin, 'operation' => $operation];
+        });
+    }
+
+    /**
+     * A new voicemail PIN, shown once.
+     *
+     * @return array{pin: string, operation: ProvisioningOperation}
+     */
+    public function resetVoicemailPin(Extension $extension): array
+    {
+        if (! $extension->voicemail_enabled) {
+            throw ValidationException::withMessages(['voicemail' => 'Turn voicemail on first.']);
+        }
+
+        return DB::transaction(function () use ($extension): array {
+            $pin = Extension::newVoicemailPin();
+
+            $extension->update(['voicemail_pin' => $pin, 'version' => $extension->version + 1]);
+            $operation = $this->provision($extension, OperationType::CredentialRotated);
+
+            $this->audit->record('extension.voicemail_pin_reset', $extension, ['number' => $extension->extension_number]);
+
+            return ['pin' => $pin, 'operation' => $operation];
+        });
+    }
+
+    /**
      * Writes the extension to its node again, e.g. after a failed operation.
      */
     public function reapply(Extension $extension): ProvisioningOperation

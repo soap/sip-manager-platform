@@ -146,6 +146,7 @@ class RingGroupController extends Controller
                 'number' => $extension->extension_number,
                 'name' => $extension->display_name,
                 'status' => $extension->status->value,
+                'voicemail' => $extension->voicemail_enabled,
             ]),
             'failoverGroups' => RingGroup::query()
                 ->when($except !== null, fn ($query) => $query->whereKeyNot($except?->id))
@@ -166,6 +167,7 @@ class RingGroupController extends Controller
             FailoverType::Hangup => 'Hang up',
             FailoverType::Extension => 'Extension '.(Extension::query()->find($group->failover_id)->extension_number ?? '?'),
             FailoverType::RingGroup => 'Ring group '.($groups[$group->failover_id]->number ?? '?'),
+            FailoverType::Voicemail => 'Voicemail of '.(Extension::query()->find($group->failover_id)->extension_number ?? '?'),
         };
     }
 }

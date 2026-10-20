@@ -20,13 +20,14 @@ export type ProvisioningStall = {
 
 export type RingStrategy = 'ring_all' | 'sequential';
 
-export type FailoverType = 'hangup' | 'extension' | 'ring_group';
+export type FailoverType = 'hangup' | 'extension' | 'ring_group' | 'voicemail';
 
 export type ExtensionOption = {
     id: number;
     number: string;
     name: string;
     status: 'active' | 'disabled';
+    voicemail: boolean;
 };
 
 export type RingGroupOption = {

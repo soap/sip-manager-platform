@@ -4,6 +4,7 @@ namespace App\Modules\Telephony\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Provisioning\Compiler\NumberCompiler;
 use App\Modules\Provisioning\LatestOperations;
 use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Actions\ManageExtensions;
@@ -32,6 +33,7 @@ class ExtensionController extends Controller
                 'prefix' => $assignment->numberRange->prefix,
                 'numbers' => $assignment->numberRange->label(),
                 'status' => $assignment->status->value,
+                'voicemail' => $assignment->node->hasVoicemail(),
                 'server' => $this->sipServer($assignment->node),
             ],
             'extensions' => $list->map(fn (Extension $extension): array => [
@@ -39,6 +41,7 @@ class ExtensionController extends Controller
                 'extension_number' => $extension->extension_number,
                 'display_name' => $extension->display_name,
                 'status' => $extension->status->value,
+                'voicemail_enabled' => $extension->voicemail_enabled,
                 'version' => $extension->version,
                 'provisioning' => $operations->get($extension->id),
             ]),
@@ -97,6 +100,37 @@ class ExtensionController extends Controller
         return back();
     }
 
+    public function voicemail(Request $request, Tenant $tenant, int $extension, ManageExtensions $extensions): RedirectResponse
+    {
+        Gate::authorize('manageExtensions', $tenant);
+        $request->validate(['enabled' => ['required', 'boolean']]);
+
+        $model = Extension::query()->findOrFail($extension);
+        $result = $extensions->setVoicemail($model, $request->boolean('enabled'));
+
+        if ($result['pin'] !== null) {
+            $this->revealVoicemailPin($model, $result['pin']);
+        }
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => $result['pin'] === null
+            ? "Voicemail of {$model->extension_number} turned off."
+            : "Voicemail of {$model->extension_number} turned on."]);
+
+        return back();
+    }
+
+    public function resetVoicemailPin(Tenant $tenant, int $extension, ManageExtensions $extensions): RedirectResponse
+    {
+        Gate::authorize('manageExtensions', $tenant);
+
+        $model = Extension::query()->findOrFail($extension);
+        $this->revealVoicemailPin($model, $extensions->resetVoicemailPin($model)['pin']);
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => "New voicemail PIN for {$model->extension_number}."]);
+
+        return back();
+    }
+
     public function reapply(Tenant $tenant, int $extension, ManageExtensions $extensions): RedirectResponse
     {
         Gate::authorize('manageExtensions', $tenant);
@@ -118,6 +152,18 @@ class ExtensionController extends Controller
             'username' => $extension->extension_number,
             'password' => $password,
             ...$this->sipServer($extension->node),
+        ]);
+    }
+
+    /**
+     * The PIN is in this one response only, like a SIP password.
+     */
+    private function revealVoicemailPin(Extension $extension, string $pin): void
+    {
+        Inertia::flash('voicemailPin', [
+            'extension_number' => $extension->extension_number,
+            'pin' => $pin,
+            'feature_code' => NumberCompiler::VOICEMAIL_MAIN_EXTEN,
         ]);
     }
 

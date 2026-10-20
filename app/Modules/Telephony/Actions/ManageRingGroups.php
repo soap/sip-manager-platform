@@ -176,12 +176,16 @@ class ManageRingGroups
         }
 
         $found = match ($type) {
-            FailoverType::Extension => Extension::query()->whereKey($id)->exists(),
+            FailoverType::Extension, FailoverType::Voicemail => Extension::query()->whereKey($id)->exists(),
             FailoverType::RingGroup => RingGroup::query()->whereKey($id)->exists(),
         };
 
         if ($id === null || ! $found) {
             throw ValidationException::withMessages(['failover_id' => 'Choose an extension or ring group of this tenant.']);
+        }
+
+        if ($type === FailoverType::Voicemail && ! Extension::query()->whereKey($id)->where('voicemail_enabled', true)->exists()) {
+            throw ValidationException::withMessages(['failover_id' => 'This extension has no voicemail.']);
         }
 
         if ($type === FailoverType::RingGroup && $group !== null && $this->leadsBackTo($group->id, $id)) {

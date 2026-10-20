@@ -38,6 +38,7 @@ type Extension = {
     extension_number: string;
     display_name: string;
     status: ExtensionStatus;
+    voicemail_enabled: boolean;
     version: number;
     provisioning: ProvisioningState | null;
 };
@@ -60,6 +61,7 @@ const props = defineProps<{
         prefix: string;
         numbers: string;
         status: 'active' | 'suspended';
+        voicemail: boolean;
         server: SipServer;
     } | null;
     extensions: Extension[];
@@ -98,6 +100,65 @@ watch(
     },
     { immediate: true },
 );
+
+type VoicemailPin = {
+    extension_number: string;
+    pin: string;
+    feature_code: string;
+};
+
+/** Like the SIP password: a new voicemail PIN arrives once, as flash data. */
+const revealedPin = ref<VoicemailPin | null>(null);
+
+watch(
+    () => (page.flash as { voicemailPin?: VoicemailPin }).voicemailPin,
+    (pin) => {
+        if (pin) {
+            revealedPin.value = pin;
+        }
+    },
+    { immediate: true },
+);
+
+function setVoicemail(extension: Extension, event: Event): void {
+    const checkbox = event.target as HTMLInputElement;
+    const enabled = checkbox.checked;
+
+    if (
+        !enabled &&
+        !confirm(
+            `Turn voicemail of ${extension.extension_number} off? Unanswered calls will no longer leave a message.`,
+        )
+    ) {
+        checkbox.checked = true;
+
+        return;
+    }
+
+    router.visit(
+        ExtensionController.voicemail({
+            tenant: tenant.value.slug,
+            extension: extension.id,
+        }),
+        { data: { enabled }, preserveScroll: true },
+    );
+}
+
+function resetPin(extension: Extension): void {
+    if (
+        !confirm(`Give the mailbox of ${extension.extension_number} a new PIN?`)
+    ) {
+        return;
+    }
+
+    router.visit(
+        ExtensionController.resetVoicemailPin({
+            tenant: tenant.value.slug,
+            extension: extension.id,
+        }),
+        { preserveScroll: true },
+    );
+}
 
 const inProgress = computed(() =>
     isInProgress(props.extensions.map((extension) => extension.provisioning)),
@@ -279,6 +340,44 @@ function remove(extension: Extension): void {
             </CardContent>
         </Card>
 
+        <Card v-if="revealedPin" class="border-amber-500/60">
+            <CardHeader>
+                <CardTitle
+                    >Voicemail PIN of
+                    {{ revealedPin.extension_number }}</CardTitle
+                >
+                <CardDescription>
+                    Give it to the person who uses the phone. It is shown only
+                    this once; set a new one if it gets lost. A PIN changed from
+                    the phone's voicemail menu is put back to this one when the
+                    extension is written to the PBX again.
+                </CardDescription>
+            </CardHeader>
+            <CardContent class="grid gap-4">
+                <dl
+                    class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]"
+                >
+                    <dt class="text-muted-foreground">PIN</dt>
+                    <dd class="font-mono select-all" data-test="voicemail-pin">
+                        {{ revealedPin.pin }}
+                    </dd>
+                    <dt class="text-muted-foreground">Listen to messages</dt>
+                    <dd>
+                        Dial
+                        <span class="font-mono">{{
+                            revealedPin.feature_code
+                        }}</span>
+                        from the phone (set it as the phone's voicemail number)
+                    </dd>
+                </dl>
+                <div>
+                    <Button variant="outline" @click="revealedPin = null"
+                        >I have saved it</Button
+                    >
+                </div>
+            </CardContent>
+        </Card>
+
         <Card v-if="canManage && assignment">
             <CardHeader>
                 <CardTitle>New extension</CardTitle>
@@ -332,7 +431,12 @@ function remove(extension: Extension): void {
         </Card>
 
         <InputError
-            :message="errors.extension ?? errors.display_name ?? errors.status"
+            :message="
+                errors.extension ??
+                errors.voicemail ??
+                errors.display_name ??
+                errors.status
+            "
         />
 
         <div class="overflow-x-auto rounded-xl border">
@@ -342,6 +446,12 @@ function remove(extension: Extension): void {
                         <th class="px-4 py-2 font-medium">Number</th>
                         <th class="px-4 py-2 font-medium">Name</th>
                         <th class="px-4 py-2 font-medium">Status</th>
+                        <th
+                            v-if="assignment?.voicemail"
+                            class="px-4 py-2 font-medium"
+                        >
+                            Voicemail
+                        </th>
                         <th class="px-4 py-2 font-medium">PBX</th>
                         <th v-if="canManage" class="px-4 py-2" />
                     </tr>
@@ -379,6 +489,39 @@ function remove(extension: Extension): void {
                                 class="capitalize"
                                 >{{ extension.status }}</Badge
                             >
+                        </td>
+                        <td v-if="assignment?.voicemail" class="px-4 py-2">
+                            <div class="flex items-center gap-2">
+                                <label
+                                    class="flex items-center gap-2"
+                                    :class="{ 'cursor-pointer': canManage }"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        class="size-4 accent-primary"
+                                        :checked="extension.voicemail_enabled"
+                                        :disabled="!canManage"
+                                        :aria-label="`Voicemail of ${extension.extension_number}`"
+                                        @change="
+                                            setVoicemail(extension, $event)
+                                        "
+                                    />
+                                    <span class="text-xs">{{
+                                        extension.voicemail_enabled
+                                            ? 'On'
+                                            : 'Off'
+                                    }}</span>
+                                </label>
+                                <Button
+                                    v-if="
+                                        canManage && extension.voicemail_enabled
+                                    "
+                                    size="sm"
+                                    variant="ghost"
+                                    @click="resetPin(extension)"
+                                    >New PIN</Button
+                                >
+                            </div>
                         </td>
                         <td class="px-4 py-2">
                             <ProvisioningBadge
@@ -421,7 +564,10 @@ function remove(extension: Extension): void {
                     </tr>
                     <tr v-if="extensions.length === 0">
                         <td
-                            :colspan="canManage ? 5 : 4"
+                            :colspan="
+                                (canManage ? 5 : 4) +
+                                (assignment?.voicemail ? 1 : 0)
+                            "
                             class="px-4 py-6 text-center text-muted-foreground"
                         >
                             No extensions yet.

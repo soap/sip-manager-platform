@@ -35,7 +35,7 @@ class PbxNodeFactory extends Factory
             'addresses' => ['public' => fake()->ipv4(), 'public_ipv6' => null, 'private' => $privateIp, 'management' => $privateIp],
             'services' => [
                 'opensips' => ['release' => '3.6', 'version' => null, 'status' => 'installed', 'installed_at' => null, 'transports' => ['udp', 'tcp'], 'sip_port' => 5060],
-                'asterisk' => ['release' => '22', 'version' => '22.11.0', 'status' => 'installed', 'installed_at' => null, 'features' => ['ami', 'ari', 'realtime']],
+                'asterisk' => ['release' => '22', 'version' => '22.11.0', 'status' => 'installed', 'installed_at' => null, 'features' => ['ami', 'ari', 'realtime', 'voicemail']],
             ],
             'endpoints' => [
                 'opensips_db' => ['host' => $privateIp, 'port' => 3306, 'database' => 'opensips', 'username' => 'manager'],
