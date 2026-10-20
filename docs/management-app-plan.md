@@ -363,5 +363,26 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - SIP Deployer → Reinstall Asterisk ของ `sip-server-test-02` (run 12) ด้วย features `ami, ari, realtime, voicemail, queues` — ไม่ compile ใหม่ (22.11.0 build อยู่แล้ว), DB/รหัสผ่านคงเดิม, Asterisk restart สั้นๆ; `nodes:sync` แล้ว manifest ไม่มี `direct_dial`
 - ตรวจผ่าน AMI: เบอร์ที่ไม่มีแถว (29999) ไม่พบ priority 1 แล้ว, 20101 เห็น priority 1–4, `denied` เห็นครบ — เบอร์ที่ไม่มี dialplan ใน `managed` โทรไม่ติดอีกต่อไป
 
+### ทดสอบ P0 ของ M5 (20 ต.ค. 2026)
+- ✅ tenant ที่ 2 (prefix 30), extension 30101 บน MizuDroid (Android) register ได้, `*43` echo ได้ยินเสียงตัวเอง
+- ✅ โทรข้าม tenant (30101 → 20101) ได้ยิน "the number you dialed is not in service" (exten `denied`) — CDR `dst=denied`
+- บทเรียน "โทรได้แต่ไม่มีเสียง": ดู Final packet stats ของ rtpengine (in/out ของขาโทรศัพท์) — ทั้งสองทางมีแพ็กเก็ตแปลว่า server ส่งครบ; แยกขาเข้า/ขาออกด้วยการโทรไป `denied` (ได้ยินประกาศ = ขาเข้าปกติ) — ครั้งนี้เป็นไมค์ของแอปฝั่งโทรศัพท์
+- ✅ ปิด extension (20102): โทรเข้า 20101 → 20102 ไป `denied` (CDR `lastapp=Hangup`), โทรศัพท์ register ไม่ได้ (`SIP auth failed: REGISTER … as 20102`) — แต่โทรศัพท์ส่ง REGISTER ผิด 5 ครั้งใน 1 วินาที ถึงเกณฑ์ fail2ban พอดี (เสี่ยงแบน IP ทั้งออฟฟิศ) → ต้องแก้ใน SIP Deployer
+- ⏳ ยังต้องทดสอบ: PAI ปลอม
+- พบระหว่างทดสอบ: 20102 เป็น MizuDroid ที่ register ผ่าน IPv6 — ยังไม่ได้ตรวจว่า rtpengine มี IPv6; ~~ช่องโหว่ใน opensips.cfg ที่คำขอจากโดเมนอื่นไป `lookup("location")` ตรงโดยไม่ผ่าน Asterisk~~ (แก้แล้ว ด้านล่าง)
+
+### SIP Deployer: ไม่มีอะไรถึงโทรศัพท์โดยไม่ผ่าน Asterisk (20 ต.ค. 2026, ยังไม่ commit ใน sip-deployer)
+- `opensips.cfg` (เฉพาะ node ที่มี Asterisk): (1) คำขอที่ `From` เป็นโดเมนอื่น = `403 Foreign caller forbidden` ก่อน auth (ไม่นับใน fail2ban; ยังไม่มี trunk); (2) โทรศัพท์ส่งไปโดเมนอื่น = `403 Relay Forbidden` (เดิม relay ออกได้โดยไม่ผ่าน dialplan); (3) คำขออื่นที่ไม่ใช่ INVITE จากโทรศัพท์ถึงโทรศัพท์ (MESSAGE, OPTIONS, REFER ฯลฯ) = `403 Forbidden` (เดิมไป `lookup` ตรง ข้าม tenant ได้); สายจาก Asterisk ไปโทรศัพท์ และ in-dialog requests ไม่เปลี่ยน
+- test ใน `OpenSipsConfigTest`; 267 tests ผ่าน
+- ติดตั้งบน node lab: Reinstall Asterisk (run 13) เขียน opensips.cfg ใหม่ ตรวจด้วย `opensips -C` แล้ว restart; ทดสอบจริง: OPTIONS จาก `foreign.example` ถึง `20101@168.144.99.9` ได้ `403 Foreign caller forbidden`
+
+### Extension ที่ปิดไม่ทำให้ fail2ban แบน IP (20 ต.ค. 2026, ยังไม่ commit ทั้งสอง repo)
+- **ข้อตกลงระหว่างสองแอป:** subscriber ที่ `ha1 = "disabled"` = บัญชีที่ถูกปิด (digest จริงเป็น hex จึงไม่ชนกัน) — ไม่ต้องเปลี่ยน schema
+- sip-manager: extension ที่ปิด / tenant หรือ assignment ถูก suspend → compile เป็น subscriber `ha1 = ha1_sha256 = "disabled"` (`NumberCompiler::DISABLED_HA1`) แทนการลบแถว; ลบ extension ยังลบแถว (เบอร์นำกลับมาใช้ได้); ring group ไม่มี subscriber
+- SIP Deployer `opensips.cfg`: `route[disabled_account]` (sqlops `sql_select_one` บน subscriber ด้วย `$au`/`$ar` ที่ escape แล้ว) ก่อน `www_authorize` และ `proxy_authorize` → `403 Account disabled` โดยไม่ log "SIP auth failed" (fail2ban ไม่นับ); node ที่ยังใช้ cfg เก่าจะเห็นแถวนี้เป็นรหัสผิดเหมือนเดิม (ไม่แย่ลง)
+- ลำดับการติดตั้ง: SIP Deployer ก่อน (Reinstall Asterisk run 14, `opensips -C` ผ่าน) แล้วค่อย reapply ใน sip-manager
+- ทดสอบจริง: 20102 (ปิดอยู่) → แถว `ha1 = disabled` (`applied`); REGISTER พร้อม credentials ปลอมในชื่อ 20102 ได้ `403 Account disabled`, ไม่มี "SIP auth failed" จาก IP ทดสอบ
+- tests: sip-manager 214, sip-deployer `OpenSipsConfigTest` 18
+
 ### ถัดไป
-ทดสอบ P0 ของ M5 (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations
+ยืนยันว่าโทรศัพท์ปกติ register/โทรได้หลังเปลี่ยน cfg → ทดสอบ PAI ปลอม → commit ทั้งสอง repo → หน้า Operations (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations

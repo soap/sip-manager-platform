@@ -31,8 +31,10 @@ use App\Modules\Tenancy\Models\Tenant;
  * unanswered or busy call is left there (VoiceMail ... b or u) before Hangup(). Phones reach their
  * own box with *97.
  *
- * Anything disabled, or of a suspended tenant or assignment, loses its subscriber and its box, and
- * sends every caller to denied. A number nobody owns gets no rows at all.
+ * Anything disabled, or of a suspended tenant or assignment, loses its box and sends every caller
+ * to denied. A disabled extension keeps its subscriber with ha1 "disabled", which OpenSIPS refuses
+ * with a plain 403 instead of a failed authentication, so the phone's retries cannot get the
+ * office address banned by fail2ban (SIP Deployer contract). A number nobody owns gets no rows.
  */
 class NumberCompiler
 {
@@ -44,6 +46,9 @@ class NumberCompiler
 
     /** Shared by every tenant: the feature code for one's own mailbox. */
     public const VOICEMAIL_MAIN_EXTEN = '*97';
+
+    /** The ha1 of a disabled account; a real digest is hex, so it never matches a password. */
+    public const DISABLED_HA1 = 'disabled';
 
     /** The width of extensions.appdata in the Asterisk realtime schema. */
     public const MAX_APPDATA = 256;
@@ -68,7 +73,7 @@ class NumberCompiler
         $range = $this->range($node, $owner->tenant_id, $number);
 
         if (! $owner->isActive() || ! $this->tenantInService($owner->tenant_id, $node)) {
-            return $this->disabled($number);
+            return $this->disabled($node, $number, $owner instanceof Extension ? $owner : null);
         }
 
         return $owner instanceof Extension
@@ -98,11 +103,7 @@ class NumberCompiler
             throw ProvisioningRejected::because('missing_credential', "Extension {$number} has no SIP credential.");
         }
 
-        $domain = (string) ($node->sip_domain ?? $node->addresses['public'] ?? '');
-
-        if ($domain === '') {
-            throw ProvisioningRejected::because('missing_sip_domain', "Node {$node->name} has no SIP domain.");
-        }
+        $domain = $this->sipDomain($node);
 
         $voicemail = $extension->hasVoicemail();
 
@@ -231,11 +232,35 @@ class NumberCompiler
         );
     }
 
-    private function disabled(string $number): CompiledNumber
+    /**
+     * Callers go to denied; an extension's phone is refused by OpenSIPS as a disabled account.
+     */
+    private function disabled(PbxNode $node, string $number, ?Extension $extension): CompiledNumber
     {
-        return new CompiledNumber($number, 'disabled', null, [
+        $domain = $extension === null ? null : $this->sipDomain($node);
+
+        return new CompiledNumber($number, 'disabled', $domain === null ? null : [
+            'username' => $extension->sipCredential->sip_username ?? $number,
+            'domain' => $domain,
+            'ha1' => self::DISABLED_HA1,
+            'ha1_sha256' => self::DISABLED_HA1,
+        ], [
             ['priority' => 1, 'app' => 'Goto', 'appdata' => self::DENIED_EXTEN.',1'],
         ]);
+    }
+
+    /**
+     * The realm and domain of the node's subscribers.
+     */
+    private function sipDomain(PbxNode $node): string
+    {
+        $domain = (string) ($node->sip_domain ?? $node->addresses['public'] ?? '');
+
+        if ($domain === '') {
+            throw ProvisioningRejected::because('missing_sip_domain', "Node {$node->name} has no SIP domain.");
+        }
+
+        return $domain;
     }
 
     private function range(PbxNode $node, string $tenantId, string $number): TenantNumberRange

@@ -125,7 +125,8 @@ it('takes a disabled extension out of service and a deleted one off the node', f
     $this->patch(route('tenant.extensions.update', [$tenant, $extension->id]), ['display_name' => 'Reception', 'status' => 'disabled']);
     applyPendingRevisions();
 
-    expect($node->subscribers)->not->toHaveKey('20101')
+    // the subscriber stays as a disabled account, which OpenSIPS refuses without a failed authentication for fail2ban
+    expect($node->subscribers['20101'])->toMatchArray(['username' => '20101', 'ha1' => 'disabled', 'ha1_sha256' => 'disabled'])
         ->and($node->extens['20101'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
 
     $this->delete(route('tenant.extensions.destroy', [$tenant, $extension->id]));
@@ -163,7 +164,7 @@ it('suspends and resumes every number of a tenant with its assignment', function
     applyPendingRevisions();
 
     expect(ProvisioningOperation::query()->where('type', OperationType::AssignmentChanged)->count())->toBe(2)
-        ->and($node->subscribers)->toBe([]);
+        ->and(array_unique(array_column($node->subscribers, 'ha1')))->toBe(['disabled']);
     foreach ($numbers as $number) {
         expect($node->extens[$number])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
     }
@@ -171,7 +172,8 @@ it('suspends and resumes every number of a tenant with its assignment', function
     $this->patch(route('admin.assignments.update', $assignment), ['prefix' => '20', 'status' => 'active']);
     applyPendingRevisions();
 
-    expect(array_keys($node->subscribers))->toEqualCanonicalizing($numbers);
+    expect(array_keys($node->subscribers))->toEqualCanonicalizing($numbers)
+        ->and(array_column($node->subscribers, 'ha1'))->not->toContain('disabled');
 });
 
 it('rotates a SIP password and writes the new digest', function () {
