@@ -2,6 +2,7 @@
 
 namespace App\Modules\Provisioning\Actions;
 
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
 use App\Modules\Infrastructure\Asterisk\RealtimeAdapter;
 use App\Modules\Infrastructure\OpenSips\OpenSipsDbAdapter;
 use App\Modules\Nodes\Models\PbxNode;
@@ -19,8 +20,9 @@ use Throwable;
 /**
  * Steps 4–8 of the pipeline (plan v0.2 §6.1) for one revision: compile the number's desired state
  * as it is now, validate it against the node, write Asterisk first and OpenSIPS last (so a phone
- * cannot register before its dialplan is ready), read both back and compare checksums. Ends applied,
- * retrying with backoff, or failed.
+ * cannot register before its dialplan is ready), read both back and compare checksums, then ask
+ * Asterisk over AMI whether it sees the dialplan and the mailbox. Ends applied, retrying with backoff,
+ * or failed.
  */
 class ApplyRevision
 {
@@ -31,6 +33,7 @@ class ApplyRevision
         private NumberCompiler $compiler,
         private RealtimeAdapter $asterisk,
         private OpenSipsDbAdapter $openSips,
+        private AmiAdapter $ami,
         private ErrorClassifier $classifier,
     ) {}
 
@@ -54,7 +57,7 @@ class ApplyRevision
         $attempt = $this->start($revision);
 
         try {
-            $compiled = $this->apply($revision);
+            [$compiled, $asterisk] = $this->apply($revision);
         } catch (Throwable $exception) {
             return $this->failed($revision, $attempt, $exception);
         }
@@ -63,14 +66,17 @@ class ApplyRevision
             'status' => RevisionStatus::Applied,
             'checksum' => $compiled->checksum(),
             'compiled' => $compiled->withoutSecrets(),
-            'apply_result' => ['read_back' => 'match', 'state' => $compiled->state, 'attempt' => $attempt, 'applied_at' => now()->toIso8601String()],
+            'apply_result' => ['read_back' => 'match', 'asterisk' => $asterisk, 'state' => $compiled->state, 'attempt' => $attempt, 'applied_at' => now()->toIso8601String()],
         ]);
         $revision->operations()->update(['status' => OperationStatus::Applied, 'error_code' => null, 'error_message' => null, 'next_attempt_at' => null]);
 
         return null;
     }
 
-    private function apply(ConfigRevision $revision): CompiledNumber
+    /**
+     * @return array{CompiledNumber, string} the compiled rows, and whether Asterisk confirmed them
+     */
+    private function apply(ConfigRevision $revision): array
     {
         $node = $revision->node;
         $number = $revision->targetNumber();
@@ -107,7 +113,41 @@ class ApplyRevision
             throw new ReadBackMismatch("The rows of {$number} read back from {$node->name} differ from those written.");
         }
 
-        return $compiled;
+        return [$compiled, $this->confirmWithAsterisk($node, $compiled)];
+    }
+
+    /**
+     * Rows in the database are not yet a working number: Asterisk must find every priority through
+     * the realtime switch, and app_voicemail the mailbox (plan v0.2 §6.3). A node without AMI is
+     * trusted on the database read-back alone.
+     *
+     * @return string "confirmed", or "unchecked" when the node has no AMI
+     */
+    private function confirmWithAsterisk(PbxNode $node, CompiledNumber $compiled): string
+    {
+        if (! isset($node->endpoints['ami'])) {
+            return 'unchecked';
+        }
+
+        $missing = $this->ami->missingPriorities($node, $compiled->number, count($compiled->dialplan));
+
+        if ($missing !== []) {
+            throw new ReadBackMismatch(sprintf(
+                'Asterisk on %s does not see priorities %s of %s in %s.',
+                $node->name,
+                implode(', ', $missing),
+                $compiled->number,
+                $this->ami->entryContext($node),
+            ));
+        }
+
+        $box = $compiled->voicemail;
+
+        if ($box !== null && ! $this->ami->hasMailbox($node, $box['mailbox'], $box['context'])) {
+            throw new ReadBackMismatch("Asterisk on {$node->name} does not find mailbox {$box['mailbox']}@{$box['context']}.");
+        }
+
+        return 'confirmed';
     }
 
     private function validateNode(PbxNode $node): void

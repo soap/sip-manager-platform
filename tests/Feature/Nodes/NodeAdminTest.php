@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\User;
-use App\Modules\Nodes\AmiLogin;
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
 use App\Modules\Nodes\Models\PbxNode;
 use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -51,12 +51,12 @@ it('tells the admin when the deployer cannot be asked', function () {
 
 it('checks the connections of a node', function () {
     $node = PbxNode::factory()->create(['endpoints' => ['ami' => ['host' => '10.104.0.5', 'port' => 5038, 'username' => 'manager']]]);
-    $this->mock(AmiLogin::class)->shouldReceive('attempt')->once();
+    $this->mock(AmiAdapter::class)->shouldReceive('version')->once()->andReturn('Asterisk 22.11.0');
     signIn(User::factory()->platformAdmin()->create());
 
     $this->post(route('admin.nodes.check', $node))
         ->assertRedirect(route('admin.nodes.index'))
         ->assertInertiaFlash('toast.type', 'success');
 
-    expect($node->fresh()->connection_checks)->toBe(['ami' => ['ok' => true, 'message' => 'Logged in']]);
+    expect($node->fresh()->connection_checks)->toBe(['ami' => ['ok' => true, 'message' => 'Asterisk 22.11.0']]);
 });

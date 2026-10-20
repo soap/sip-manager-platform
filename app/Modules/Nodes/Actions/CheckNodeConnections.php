@@ -2,7 +2,7 @@
 
 namespace App\Modules\Nodes\Actions;
 
-use App\Modules\Nodes\AmiLogin;
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\NodeConnections;
 use Illuminate\Support\Str;
@@ -15,7 +15,7 @@ use Throwable;
  */
 class CheckNodeConnections
 {
-    public function __construct(private NodeConnections $connections, private AmiLogin $amiLogin) {}
+    public function __construct(private NodeConnections $connections, private AmiAdapter $ami) {}
 
     /**
      * @return array<string, array{ok: bool, message: string}>
@@ -29,7 +29,7 @@ class CheckNodeConnections
                 'opensips_db' => $this->database($this->connections->openSipsDatabase($node)->select('select version() as version')),
                 'asterisk_db' => $this->database($this->connections->asteriskDatabase($node)->select('select version() as version')),
                 'ari' => 'Asterisk '.($this->connections->ari($node)->get('asterisk/info')->throw()->json('system.version') ?? 'answered'),
-                'ami' => $this->ami($node),
+                'ami' => $this->ami->version($node),
                 default => throw new RuntimeException('This application does not use this endpoint.'),
             });
         }
@@ -58,12 +58,5 @@ class CheckNodeConnections
     private function database(array $rows): string
     {
         return 'MariaDB '.($rows[0]->version ?? 'answered');
-    }
-
-    private function ami(PbxNode $node): string
-    {
-        $this->amiLogin->attempt($this->connections->ami($node));
-
-        return 'Logged in';
     }
 }

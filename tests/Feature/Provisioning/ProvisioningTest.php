@@ -2,6 +2,9 @@
 
 use App\Models\User;
 use App\Modules\Audit\Models\AuditLog;
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
+use App\Modules\Infrastructure\Asterisk\Exceptions\AmiActionFailed;
+use App\Modules\Infrastructure\Asterisk\Exceptions\AmiUnavailable;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Provisioning\Actions\ApplyRevision;
 use App\Modules\Provisioning\Actions\RequestProvisioning;
@@ -233,6 +236,56 @@ it('retries when the rows read back differ from those written', function () {
     expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe(10)
         ->and(ProvisioningOperation::query()->sole()->error_code)->toBe('read_back_mismatch');
 });
+
+it('confirms over AMI that Asterisk sees the written dialplan', function () {
+    fakeNode();
+    [$tenant] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+
+    applyPendingRevisions();
+
+    expect(ConfigRevision::query()->sole()->apply_result['asterisk'])->toBe('confirmed');
+});
+
+it('retries when Asterisk does not see the rows the database holds', function () {
+    $node = fakeNode();
+    $node->asteriskBlind = true;
+    [$tenant] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+
+    expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe(10)
+        ->and(ProvisioningOperation::query()->sole())
+        ->error_code->toBe('read_back_mismatch')
+        ->error_message->toContain('does not see priorities 1, 2, 3 of 20101 in from-opensips');
+});
+
+it('trusts the database read-back on a node without AMI', function () {
+    fakeNode();
+    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment->node->update(['endpoints' => collect($assignment->node->endpoints)->except('ami')->all()]);
+    [$tenant] = provisioningTenant($assignment);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+
+    applyPendingRevisions();
+
+    expect(ConfigRevision::query()->sole())
+        ->status->toBe(RevisionStatus::Applied)
+        ->apply_result->asterisk->toBe('unchecked');
+});
+
+it('retries when AMI does not answer and fails when it refuses the login', function (Throwable $exception, ?int $retryIn, string $errorCode) {
+    fakeNode();
+    $this->mock(AmiAdapter::class)->shouldReceive('missingPriorities')->andThrow($exception);
+    [$tenant] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+
+    expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe($retryIn)
+        ->and(ProvisioningOperation::query()->sole()->error_code)->toBe($errorCode);
+})->with([
+    'timeout' => [AmiUnavailable::timedOut(), 10, 'node_unreachable'],
+    'login refused' => [AmiActionFailed::for('Login', 'Authentication failed'), null, 'node_auth_failed'],
+    'no such function' => [AmiActionFailed::for('Getvar', 'Function DIALPLAN_EXISTS not found'), null, 'ami_error'],
+]);
 
 it('refuses a node without the realtime feature', function () {
     fakeNode();

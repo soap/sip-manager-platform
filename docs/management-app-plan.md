@@ -209,8 +209,8 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 | สิ่งที่เปลี่ยน | ต้อง reload? | ตรวจอย่างไร |
 |---|---|---|
 | `subscriber` | ไม่ (auth_db query ทุกครั้ง) | SELECT ha1 ตรงกับที่ compile |
-| `extensions` realtime | ไม่ | AMI `Command: dialplan show 1001@managed` เห็น priority ครบ |
-| `voicemail` | ไม่ | AMI `VoicemailUsersList` มี mailbox |
+| `extensions` realtime | ไม่ | AMI `Getvar DIALPLAN_EXISTS(from-opensips,<n>,<p>)` = 1 ทุก priority (`dialplan show <n>@managed` ใช้ไม่ได้: context `managed` เข้าถึงผ่าน realtime switch ของ `from-opensips` เท่านั้น ไม่มีใน dialplan ในหน่วยความจำ) |
+| `voicemail` | ไม่ | AMI `Getvar VM_INFO(<n>@t<PP>,exists)` = 1 (`VoicemailUsersList` ไม่แสดง mailbox realtime ที่ยังไม่ถูกโหลด) |
 | `queues`/`queue_members` | บางกรณี (`queue reload realtime`) | AMI `QueueStatus` |
 | `ps_*` (trunk, P4) | ไม่ (sorcery realtime) | AMI `PJSIPShowEndpoint` |
 
@@ -339,5 +339,14 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - ทดสอบบน node lab: 20101–20103 มี mailbox, `*97` และ dialplan ถูกต้อง (`applied`); **ทดสอบด้วยโทรศัพท์แล้ว** — ฝากข้อความ, `*97` + PIN, ฟัง/ลบข้อความได้ (DTMF แบบ RFC2833 ผ่าน rtpengine ถึง Asterisk ปกติ; โทรศัพท์ต้องตั้ง DTMF เป็น RFC2833 เพราะ endpoint `opensips` เป็น `dtmf_mode = rfc4733`)
 - ข้อจำกัด: (1) PIN ที่เปลี่ยนจากเมนู `*97` จะถูกเขียนทับด้วย PIN ในระบบเมื่อ apply extension ครั้งถัดไป; (2) ไฟไฟข้อความ (MWI) ยังไม่ทำงาน เพราะโทรศัพท์ register ที่ OpenSIPS ไม่ใช่ Asterisk — ต้องให้ SIP Deployer ตั้ง MWI ผ่าน OpenSIPS หรือ subscribe; (3) voicemail-to-email ยังไม่มี (node ไม่มี MTA)
 
+### AmiClient + read-back ผ่าน AMI (20 ต.ค. 2026, ยังไม่ commit)
+- `Infrastructure\Asterisk\AmiClient`: socket แบบ blocking, ทีละ action, จับคู่คำตอบด้วย ActionID (`sip-manager-<n>`), login แบบ `Events: off` แล้วข้าม event อื่น, รองรับ action ที่ส่ง event list (`EventList: start` … `Complete`), `getvar()`, `command()` (Output lines), `logoff()`; ปฏิเสธ field ที่มี CR/LF; `AmiMessage` (parser, key ไม่สนตัวพิมพ์, key ซ้ำต่อกันด้วย `\n`)
+- Error: `AmiUnavailable` (ต่อไม่ได้/timeout/ปิดการเชื่อมต่อ/ไม่ใช่ AMI → retry, `node_unreachable`), `AmiActionFailed` (`Response: Error`; Login → `node_auth_failed`, อื่น → `ami_error`; ไม่ retry)
+- `AmiAdapter`: `version()` (CoreSettings — ใช้ในทดสอบการเชื่อมต่อแทน `AmiLogin` เดิม), `missingPriorities()`, `hasMailbox()` — login ครั้งละคำถามแล้ว logoff
+- `ApplyRevision` หลังเทียบ checksum: ถาม Asterisk ว่าเห็นทุก priority ของเบอร์ และ mailbox (ถ้าเปิด voicemail); ไม่เห็น = `read_back_mismatch` (retry); node ที่ไม่มี endpoint `ami` ข้าม; `apply_result.asterisk` = `confirmed` / `unchecked`
+- ทดสอบกับ node lab: Asterisk 22.11.0, 20101 เห็น priority 1–4, `20101@t20` มี mailbox
+- **ข้อจำกัด:** ตราบที่ node ยังเปิด `direct_dial` (`_X.`) priority 1 ของเบอร์ใดก็ "มี" เสมอ — extension ที่ปิด (มีแค่ `Goto(denied,1)`) จึงยืนยันได้ไม่จริงจนกว่าจะปิด direct_dial
+- 198 tests ผ่าน, Larastan ผ่าน
+
 ### ถัดไป
-AmiClient + read-back ผ่าน AMI → API v1 (M5)
+API v1 (M5)

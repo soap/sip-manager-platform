@@ -2,6 +2,8 @@
 
 namespace App\Modules\Provisioning;
 
+use App\Modules\Infrastructure\Asterisk\Exceptions\AmiActionFailed;
+use App\Modules\Infrastructure\Asterisk\Exceptions\AmiUnavailable;
 use App\Modules\Nodes\Exceptions\NodeNotConnectable;
 use App\Modules\Provisioning\Exceptions\ProvisioningRejected;
 use App\Modules\Provisioning\Exceptions\ReadBackMismatch;
@@ -40,6 +42,16 @@ class ErrorClassifier
         if ($exception instanceof NodeNotConnectable) {
             // the next node sync may bring the missing credentials
             return ['retryable' => true, 'code' => 'node_not_connectable', 'message' => $message];
+        }
+
+        if ($exception instanceof AmiUnavailable) {
+            return ['retryable' => true, 'code' => 'node_unreachable', 'message' => $message];
+        }
+
+        if ($exception instanceof AmiActionFailed) {
+            return $exception->isLogin()
+                ? ['retryable' => false, 'code' => 'node_auth_failed', 'message' => $message]
+                : ['retryable' => false, 'code' => 'ami_error', 'message' => $message];
         }
 
         if ($exception instanceof QueryException || $exception instanceof PDOException) {

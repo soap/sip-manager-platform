@@ -1,7 +1,8 @@
 <?php
 
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
+use App\Modules\Infrastructure\Asterisk\Exceptions\AmiActionFailed;
 use App\Modules\Nodes\Actions\CheckNodeConnections;
-use App\Modules\Nodes\AmiLogin;
 use App\Modules\Nodes\Exceptions\NodeNotConnectable;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\NodeConnections;
@@ -56,7 +57,7 @@ it('refuses to connect without the endpoint or its credentials', function (array
 it('records which endpoints of a node answer', function () {
     $node = PbxNode::factory()->create();
     Http::fake(['*' => Http::response(['system' => ['version' => '22.11.0']])]);
-    $this->mock(AmiLogin::class)->shouldReceive('attempt')->once()->andThrow(new RuntimeException('AMI refused the login.'));
+    $this->mock(AmiAdapter::class)->shouldReceive('version')->once()->andThrow(AmiActionFailed::for('Login', 'Authentication failed'));
     $this->partialMock(NodeConnections::class)
         ->shouldReceive('openSipsDatabase', 'asteriskDatabase')
         ->andThrow(new RuntimeException('Connection refused'));
@@ -66,7 +67,7 @@ it('records which endpoints of a node answer', function () {
     expect($checks)->toBe([
         'opensips_db' => ['ok' => false, 'message' => 'Connection refused'],
         'asterisk_db' => ['ok' => false, 'message' => 'Connection refused'],
-        'ami' => ['ok' => false, 'message' => 'AMI refused the login.'],
+        'ami' => ['ok' => false, 'message' => 'AMI refused Login: Authentication failed.'],
         'ari' => ['ok' => true, 'message' => 'Asterisk 22.11.0'],
     ])
         ->and($node->fresh()->connection_checks)->toBe($checks)

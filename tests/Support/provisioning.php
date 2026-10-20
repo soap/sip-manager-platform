@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Infrastructure\Asterisk\AmiAdapter;
 use App\Modules\Infrastructure\Asterisk\RealtimeAdapter;
 use App\Modules\Infrastructure\OpenSips\OpenSipsDbAdapter;
 use App\Modules\Nodes\Models\PbxNode;
@@ -32,6 +33,9 @@ class FakeNodeDatabases
 
     /** @var array<string, array{context: string, mailbox: string, password: string, fullname: string}> */
     public array $mailboxes = [];
+
+    /** Asterisk does not see what the database holds, e.g. its realtime connection is down. */
+    public bool $asteriskBlind = false;
 }
 
 /**
@@ -41,6 +45,26 @@ function fakeNode(): FakeNodeDatabases
 {
     $store = new FakeNodeDatabases;
     $connections = app(NodeConnections::class);
+
+    app()->instance(AmiAdapter::class, new class($connections, $store) extends AmiAdapter
+    {
+        public function __construct(NodeConnections $connections, private FakeNodeDatabases $store)
+        {
+            parent::__construct($connections);
+        }
+
+        public function missingPriorities(PbxNode $node, string $exten, int $count): array
+        {
+            $seen = $this->store->asteriskBlind ? 0 : count($this->store->extens[$exten] ?? []);
+
+            return $count > $seen ? range($seen + 1, $count) : [];
+        }
+
+        public function hasMailbox(PbxNode $node, string $mailbox, string $context): bool
+        {
+            return ! $this->store->asteriskBlind && ($this->store->mailboxes[$mailbox]['context'] ?? null) === $context;
+        }
+    });
 
     app()->instance(RealtimeAdapter::class, new class($connections, $store) extends RealtimeAdapter
     {
