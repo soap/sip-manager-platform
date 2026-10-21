@@ -13,6 +13,19 @@ export type ProvisioningState = {
     next_attempt_at: string | null;
 };
 
+export type RegistrationContact = {
+    address: string;
+    user_agent: string;
+    registered_at: string | null;
+    expires_at: string | null;
+};
+
+/** Whether an extension's phone is registered, read live from the node ("unknown" = node not reachable). */
+export type RegistrationState = {
+    status: 'registered' | 'not_registered' | 'unknown';
+    contacts: RegistrationContact[];
+};
+
 export type ProvisioningStall = {
     reason: 'relay' | 'worker';
     since: string;

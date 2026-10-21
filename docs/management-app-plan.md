@@ -384,5 +384,15 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - ทดสอบจริง: 20102 (ปิดอยู่) → แถว `ha1 = disabled` (`applied`); REGISTER พร้อม credentials ปลอมในชื่อ 20102 ได้ `403 Account disabled`, ไม่มี "SIP auth failed" จาก IP ทดสอบ
 - tests: sip-manager 214, sip-deployer `OpenSipsConfigTest` 18
 
+- ✅ ยืนยันแล้ว (21 ต.ค.): Yealink 20101 และ 20103 register ใหม่ได้ด้วย cfg ใหม่ — เส้นทาง auth ปกติไม่กระทบ
+
+### สถานะ register ในหน้า Extensions และ API (21 ต.ค. 2026, ยังไม่ commit)
+- `OpenSipsDbAdapter::registrations()` อ่าน `opensips.location` ของหลายเบอร์ใน query เดียว เฉพาะที่ยังไม่หมดอายุ (`expires = 0` หรือ `> unix_timestamp()` ของ node — แถวที่หมดอายุแล้วยังค้างในตาราง); address จาก `received` (มี NAT) หรือ `contact`, รองรับ IPv6; `last_modified` เป็น UTC
+- `ExtensionRegistrations`: สถานะต่อ extension `registered` / `not_registered` / `unknown` (node ติดต่อไม่ได้ = unknown + log warning ไม่ทำให้หน้าพัง) พร้อม contacts (address, user_agent, registered_at, expires_at)
+- หน้า Extensions: คอลัมน์ Phone เป็น deferred prop (หน้าไม่รอ node) + skeleton ระหว่างโหลด, poll ทุก 30 วินาที (`only: registrations`); extension ที่ปิดแสดง "—"; หลายเครื่องแสดง ×N และรายละเอียดใน tooltip
+- API: `GET /extensions` และ `GET /extensions/{id}` มี `registration`
+- ข้อจำกัด: ช้าได้ ~1 นาที (sql-write-back); เครื่องที่ปิดโดยไม่ unregister ยังแสดง Registered จนหมดอายุ
+- ทดสอบกับ node lab: 20101/20103 (Yealink) registered พร้อม address และ user agent ถูกต้อง; 221 tests ผ่าน, Larastan, vue-tsc, build ผ่าน
+
 ### ถัดไป
-ยืนยันว่าโทรศัพท์ปกติ register/โทรได้หลังเปลี่ยน cfg → ทดสอบ PAI ปลอม → commit ทั้งสอง repo → หน้า Operations (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations
+ทดสอบ PAI ปลอม → commit ทั้งสอง repo → หน้า Operations (โทรข้าม tenant ถูกปฏิเสธ, ปิด extension แล้ว register/โทรไม่ได้) → หน้า Operations

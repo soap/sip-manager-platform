@@ -8,6 +8,7 @@ use App\Modules\Provisioning\LatestOperations;
 use App\Modules\Provisioning\ProvisioningHealth;
 use App\Modules\Telephony\Actions\ManageExtensions;
 use App\Modules\Telephony\Enums\ExtensionStatus;
+use App\Modules\Telephony\ExtensionRegistrations;
 use App\Modules\Telephony\Http\Requests\StoreExtensionRequest;
 use App\Modules\Telephony\Http\Requests\UpdateExtensionRequest;
 use App\Modules\Telephony\Models\Extension;
@@ -20,8 +21,14 @@ use Inertia\Response;
 
 class ExtensionController extends Controller
 {
-    public function index(Request $request, Tenant $tenant, ManageExtensions $extensions, ProvisioningHealth $health, LatestOperations $latest): Response
-    {
+    public function index(
+        Request $request,
+        Tenant $tenant,
+        ManageExtensions $extensions,
+        ProvisioningHealth $health,
+        LatestOperations $latest,
+        ExtensionRegistrations $registrations,
+    ): Response {
         $assignment = $tenant->pbxAssignment()->with(['node', 'numberRange'])->first();
         $list = Extension::query()->orderBy('extension_number')->get();
         $operations = $latest->of($tenant->id, Extension::MORPH, $list->modelKeys());
@@ -44,6 +51,8 @@ class ExtensionController extends Controller
                 'version' => $extension->version,
                 'provisioning' => $operations->get($extension->id),
             ]),
+            // read live from the node after the page shows, so a slow or unreachable node never holds it up
+            'registrations' => Inertia::defer(fn (): array => $registrations->of($list)),
             'nextNumber' => $extensions->nextFreeNumber(),
             'statuses' => ExtensionStatus::options(),
             'canManage' => $request->user()->can('manageExtensions', $tenant),

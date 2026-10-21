@@ -10,6 +10,7 @@ use App\Modules\Provisioning\Actions\ApplyRevision;
 use App\Modules\Provisioning\Models\OutboxMessage;
 use App\Modules\Tenancy\Enums\TenantRole;
 use App\Modules\Tenancy\Models\TenantMembership;
+use Carbon\CarbonImmutable;
 
 /*
 | Helpers for tests that provision numbers: a node whose databases live in memory, and a tenant
@@ -36,6 +37,12 @@ class FakeNodeDatabases
 
     /** Asterisk does not see what the database holds, e.g. its realtime connection is down. */
     public bool $asteriskBlind = false;
+
+    /** @var array<string, list<array{address: string, user_agent: string, registered_at: CarbonImmutable|null, expires_at: CarbonImmutable|null}>> */
+    public array $registrations = [];
+
+    /** The location table cannot be read, e.g. the node is down. */
+    public bool $locationUnreachable = false;
 }
 
 /**
@@ -131,6 +138,15 @@ function fakeNode(): FakeNodeDatabases
             }
 
             return $row === null ? [] : [$row];
+        }
+
+        public function registrations(PbxNode $node, array $usernames): array
+        {
+            if ($this->store->locationUnreachable) {
+                throw new RuntimeException('SQLSTATE[HY000] [2002] Connection timed out');
+            }
+
+            return array_intersect_key($this->store->registrations, array_flip($usernames));
         }
     });
 

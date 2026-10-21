@@ -8,7 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * An extension without its secrets; "provisioning" tells whether the PBX has its latest state.
+ * An extension without its secrets; "provisioning" tells whether the PBX has its latest state and
+ * "registration" (GET only) whether its phone is registered.
  *
  * @mixin Extension
  */
@@ -27,6 +28,8 @@ class ExtensionResource extends JsonResource
             'voicemail_enabled' => $this->voicemail_enabled,
             'version' => $this->version,
             'provisioning' => $this->whenLoaded('latestOperation', fn (): ?array => $this->latestOperation === null ? null : $this->provisioning($this->latestOperation)),
+            // read live from the node on GET (ExtensionRegistrations): registered, not_registered or unknown
+            'registration' => $this->whenLoaded('registration'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

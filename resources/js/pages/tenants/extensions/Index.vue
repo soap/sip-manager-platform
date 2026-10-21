@@ -14,6 +14,7 @@ import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
 import ProvisioningBadge from '@/components/telephony/ProvisioningBadge.vue';
 import ProvisioningStalledAlert from '@/components/telephony/ProvisioningStalledAlert.vue';
+import RegistrationBadge from '@/components/telephony/RegistrationBadge.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,7 +29,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { dashboard } from '@/routes/tenant';
 import { index } from '@/routes/tenant/extensions';
-import type { ProvisioningStall, ProvisioningState } from '@/types/telephony';
+import type {
+    ProvisioningStall,
+    ProvisioningState,
+    RegistrationState,
+} from '@/types/telephony';
 import { isInProgress } from '@/types/telephony';
 
 type ExtensionStatus = 'active' | 'disabled';
@@ -65,6 +70,8 @@ const props = defineProps<{
         server: SipServer;
     } | null;
     extensions: Extension[];
+    /** Deferred: read live from the node after the page shows, keyed by extension id. */
+    registrations?: Record<number, RegistrationState>;
     nextNumber: string | null;
     statuses: { value: ExtensionStatus; label: string }[];
     canManage: boolean;
@@ -171,6 +178,9 @@ const { start, stop } = usePoll(
 );
 
 watch(inProgress, (busy) => (busy ? start() : stop()), { immediate: true });
+
+// phones register and drop off on their own, so their state is read again every 30 seconds
+usePoll(30000, { only: ['registrations'] });
 
 function update(extension: Extension, changes: Partial<Extension>): void {
     router.visit(
@@ -453,6 +463,7 @@ function remove(extension: Extension): void {
                             Voicemail
                         </th>
                         <th class="px-4 py-2 font-medium">PBX</th>
+                        <th class="px-4 py-2 font-medium">Phone</th>
                         <th v-if="canManage" class="px-4 py-2" />
                     </tr>
                 </thead>
@@ -528,6 +539,17 @@ function remove(extension: Extension): void {
                                 :provisioning="extension.provisioning"
                             />
                         </td>
+                        <td class="px-4 py-2">
+                            <span
+                                v-if="extension.status === 'disabled'"
+                                class="text-xs text-muted-foreground"
+                                >—</span
+                            >
+                            <RegistrationBadge
+                                v-else
+                                :registration="registrations?.[extension.id]"
+                            />
+                        </td>
                         <td v-if="canManage" class="px-4 py-2 text-right">
                             <div class="flex justify-end gap-2">
                                 <Button
@@ -565,7 +587,7 @@ function remove(extension: Extension): void {
                     <tr v-if="extensions.length === 0">
                         <td
                             :colspan="
-                                (canManage ? 5 : 4) +
+                                (canManage ? 6 : 5) +
                                 (assignment?.voicemail ? 1 : 0)
                             "
                             class="px-4 py-6 text-center text-muted-foreground"
