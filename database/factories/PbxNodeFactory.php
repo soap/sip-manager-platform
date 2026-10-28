@@ -43,7 +43,7 @@ class PbxNodeFactory extends Factory
                 'ami' => ['host' => $privateIp, 'port' => 5038, 'username' => 'manager'],
                 'ari' => ['host' => $privateIp, 'port' => 8088, 'scheme' => 'http', 'username' => 'manager'],
             ],
-            'dialplan' => ['entry_context' => 'from-opensips', 'managed_context' => 'managed', 'opensips_endpoint' => 'opensips'],
+            'dialplan' => ['entry_context' => 'from-opensips', 'managed_context' => 'managed', 'opensips_endpoint' => 'opensips', 'tenant_routing' => 'domain', 'tenant_code_digits' => 4],
             'credentials_version' => fake()->regexify('[a-f0-9]{16}'),
             'synced_at' => now(),
         ];

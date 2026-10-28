@@ -15,6 +15,10 @@ enum OperationType: string
     case DependencyChanged = 'dependency.changed';
     /** The tenant's assignment changed (e.g. suspended), so its numbers are written again. */
     case AssignmentChanged = 'assignment.changed';
+    /** The tenant was placed on the node, which starts serving its SIP domain. */
+    case TenantAssigned = 'assignment.created';
+    /** The tenant was taken off the node, which stops serving its SIP domain. */
+    case TenantUnassigned = 'assignment.deleted';
     /** Asked again by hand, e.g. after a failure. */
     case Reapplied = 'reapplied';
 }

@@ -7,24 +7,56 @@ use App\Modules\Provisioning\Enums\OperationType;
 use App\Modules\Provisioning\Models\ConfigRevision;
 use App\Modules\Provisioning\Models\OutboxMessage;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
+use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 use LogicException;
 
 /**
- * Step 1 of the pipeline (plan v0.2 §6.1): records that a number on a node must be written again —
- * a draft revision, a pending operation and an outbox message — in the caller's transaction, so the
- * change and the request to apply it commit or roll back together. The outbox relay then hands the
- * revision to the apply job.
+ * Step 1 of the pipeline (plan v0.2 §6.1): records that a number or a SIP domain on a node must be
+ * written again — a draft revision, a pending operation and an outbox message — in the caller's
+ * transaction, so the change and the request to apply it commit or roll back together. The outbox
+ * relay then hands the revision to the apply job.
  */
 class RequestProvisioning
 {
     /**
+     * A number of the tenant, e.g. extension 101.
+     *
      * @throws LogicException when called outside a database transaction
      */
     public function forNumber(
         int $nodeId,
-        ?string $tenantId,
+        string $tenantId,
         string $number,
+        OperationType $type,
+        string $aggregateType,
+        int $aggregateId,
+        ?string $idempotencyKey = null,
+    ): ProvisioningOperation {
+        $target = ConfigRevision::numberTarget($this->tenantCode($tenantId).$number);
+
+        return $this->request($nodeId, $tenantId, $target, $type, $aggregateType, $aggregateId, $idempotencyKey);
+    }
+
+    /**
+     * The tenant's SIP domain, which the node serves while the tenant is assigned to it.
+     *
+     * @throws LogicException when called outside a database transaction
+     */
+    public function forDomain(int $nodeId, string $tenantId, OperationType $type, string $aggregateType, int $aggregateId): ProvisioningOperation
+    {
+        return $this->request($nodeId, $tenantId, ConfigRevision::domainTarget($this->tenantCode($tenantId)), $type, $aggregateType, $aggregateId);
+    }
+
+    private function tenantCode(string $tenantId): string
+    {
+        return (string) Tenant::query()->whereKey($tenantId)->value('code');
+    }
+
+    private function request(
+        int $nodeId,
+        string $tenantId,
+        string $target,
         OperationType $type,
         string $aggregateType,
         int $aggregateId,
@@ -49,7 +81,7 @@ class RequestProvisioning
             'tenant_id' => $tenantId,
             'pbx_node_id' => $nodeId,
             'revision_number' => ((int) ConfigRevision::query()->where('pbx_node_id', $nodeId)->max('revision_number')) + 1,
-            'target' => ConfigRevision::numberTarget($number),
+            'target' => $target,
             'aggregate_type' => $aggregateType,
             'aggregate_id' => $aggregateId,
         ]);

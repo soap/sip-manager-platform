@@ -8,7 +8,6 @@ use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
 use App\Modules\Nodes\Models\PbxNode;
-use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
@@ -31,7 +30,7 @@ class NodeController extends Controller
                 ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
             'assignmentStatuses' => AssignmentStatus::options(),
             'nodes' => PbxNode::query()
-                ->with(['secrets', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug', 'numberRange'])->withCount('extensions')])
+                ->with(['secrets', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
@@ -52,15 +51,15 @@ class NodeController extends Controller
                     'checked_at' => $node->checked_at?->toIso8601String(),
                     'synced_at' => $node->synced_at?->toIso8601String(),
                     'removed_at' => $node->removed_at?->toIso8601String(),
-                    'next_prefix' => TenantNumberRange::nextFreePrefix($node->id),
+                    'tenant_routing' => $node->hasTenantDomains(),
                     'assignments' => $node->assignments
-                        ->sortBy(fn (TenantPbxAssignment $assignment): string => $assignment->numberRange->prefix ?? '')
+                        ->sortBy(fn (TenantPbxAssignment $assignment): string => $assignment->tenant->code)
                         ->values()
                         ->map(fn (TenantPbxAssignment $assignment): array => [
                             'id' => $assignment->id,
                             'tenant' => ['name' => $assignment->tenant->name, 'slug' => $assignment->tenant->slug],
-                            'prefix' => $assignment->numberRange?->prefix,
-                            'numbers' => $assignment->numberRange?->label(),
+                            'code' => $assignment->tenant->code,
+                            'sip_domain' => $assignment->tenant->sip_domain,
                             'status' => $assignment->status->value,
                             'extensions_count' => $assignment->extensions_count,
                         ]),

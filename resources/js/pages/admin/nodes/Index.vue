@@ -16,7 +16,7 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+
 import { Label } from '@/components/ui/label';
 import { index } from '@/routes/admin/nodes';
 import { index as tenantExtensions } from '@/routes/tenant/extensions';
@@ -31,8 +31,8 @@ type NodeService = {
 type Assignment = {
     id: number;
     tenant: { name: string; slug: string };
-    prefix: string | null;
-    numbers: string | null;
+    code: string;
+    sip_domain: string;
     status: 'active' | 'suspended';
     extensions_count: number;
 };
@@ -61,7 +61,7 @@ const props = defineProps<{
         checked_at: string | null;
         synced_at: string | null;
         removed_at: string | null;
-        next_prefix: string | null;
+        tenant_routing: boolean;
         assignments: Assignment[];
     }[];
 }>();
@@ -297,8 +297,8 @@ function formatDate(value: string | null): string {
 
         <Heading
             variant="small"
-            title="Tenants and numbers"
-            description="Tenants on a node share its SIP domain and dialplan, so each gets its own two-digit prefix (20–89): prefix 20 owns the numbers 20000–20999."
+            title="Tenants"
+            description="Every tenant has its own SIP domain, so its numbers are its own. In the node's dialplan a tenant's numbers start with its code (code 1042, number 201 → 1042201)."
         />
 
         <Card v-for="node in activeNodes" :key="node.id">
@@ -309,6 +309,12 @@ function formatDate(value: string | null): string {
                 }}</CardDescription>
             </CardHeader>
             <CardContent class="grid gap-4">
+                <p v-if="!node.tenant_routing" class="text-sm text-destructive">
+                    This node serves one shared SIP domain. Reinstall OpenSIPS
+                    and Asterisk from SIP Deployer, then sync, before adding
+                    tenants.
+                </p>
+
                 <div
                     v-for="assignment in node.assignments"
                     :key="assignment.id"
@@ -325,8 +331,14 @@ function formatDate(value: string | null): string {
                             >{{ assignment.tenant.name }}</Link
                         >
                         <span class="font-mono text-muted-foreground">{{
-                            assignment.numbers
+                            assignment.sip_domain
                         }}</span>
+                        <span class="text-muted-foreground"
+                            >code
+                            <span class="font-mono">{{
+                                assignment.code
+                            }}</span></span
+                        >
                         <span class="text-muted-foreground"
                             >{{ assignment.extensions_count }} extensions</span
                         >
@@ -338,25 +350,9 @@ function formatDate(value: string | null): string {
                             })
                         "
                         :options="{ preserveScroll: true }"
-                        class="grid gap-2 sm:grid-cols-[6rem_9rem_auto_auto] sm:items-start"
-                        v-slot="{ errors, processing }"
+                        class="grid gap-2 sm:grid-cols-[9rem_auto_auto] sm:items-start"
+                        v-slot="{ processing }"
                     >
-                        <div class="grid gap-1">
-                            <Input
-                                name="prefix"
-                                inputmode="numeric"
-                                maxlength="2"
-                                aria-label="Prefix"
-                                :readonly="assignment.extensions_count > 0"
-                                :title="
-                                    assignment.extensions_count > 0
-                                        ? 'The prefix is fixed while the tenant has extensions'
-                                        : undefined
-                                "
-                                :default-value="assignment.prefix ?? ''"
-                            />
-                            <InputError :message="errors.prefix" />
-                        </div>
                         <NativeSelect
                             name="status"
                             aria-label="Status"
@@ -390,11 +386,11 @@ function formatDate(value: string | null): string {
                 </p>
 
                 <Form
-                    v-if="unassignedTenants.length > 0"
+                    v-if="unassignedTenants.length > 0 && node.tenant_routing"
                     v-bind="AssignmentController.store.form({ node: node.id })"
                     reset-on-success
                     :options="{ preserveScroll: true }"
-                    class="grid gap-2 border-t pt-4 sm:grid-cols-[1fr_6rem_auto] sm:items-end"
+                    class="grid gap-2 border-t pt-4 sm:grid-cols-[1fr_auto] sm:items-end"
                     v-slot="{ errors, processing }"
                 >
                     <div class="grid gap-1">
@@ -409,24 +405,7 @@ function formatDate(value: string | null): string {
                             :message="errors.tenant_id ?? errors.pbx_node_id"
                         />
                     </div>
-                    <div class="grid gap-1">
-                        <Label :for="`prefix-${node.id}`">Prefix</Label>
-                        <Input
-                            :id="`prefix-${node.id}`"
-                            name="prefix"
-                            inputmode="numeric"
-                            maxlength="2"
-                            required
-                            :default-value="node.next_prefix ?? ''"
-                        />
-                    </div>
-                    <Button :disabled="processing || !node.next_prefix"
-                        >Assign</Button
-                    >
-                    <InputError
-                        class="sm:col-span-3"
-                        :message="errors.prefix"
-                    />
+                    <Button :disabled="processing">Assign</Button>
                 </Form>
             </CardContent>
         </Card>

@@ -2,7 +2,6 @@
 
 namespace Database\Factories;
 
-use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Enums\FailoverType;
 use App\Modules\Telephony\Enums\RingStrategy;
@@ -49,19 +48,15 @@ class RingGroupFactory extends Factory
     }
 
     /**
-     * A ring group of the assignment's tenant on its node, numbered PP5xx–PP9xx.
+     * A ring group of the assignment's tenant on its node, numbered 20500–20999.
      */
     public function on(TenantPbxAssignment $assignment): static
     {
-        return $this->state(function () use ($assignment): array {
-            $prefix = TenantNumberRange::query()->where('tenant_id', $assignment->tenant_id)->value('prefix') ?? '20';
-
-            return [
-                'tenant_id' => $assignment->tenant_id,
-                'pbx_node_id' => $assignment->pbx_node_id,
-                'number' => $prefix.fake()->unique()->numberBetween(500, 999),
-            ];
-        });
+        return $this->state(fn (): array => [
+            'tenant_id' => $assignment->tenant_id,
+            'pbx_node_id' => $assignment->pbx_node_id,
+            'number' => '20'.fake()->unique()->numberBetween(500, 999),
+        ]);
     }
 
     /**

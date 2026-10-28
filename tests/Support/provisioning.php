@@ -22,8 +22,11 @@ use Carbon\CarbonImmutable;
  */
 class FakeNodeDatabases
 {
-    /** @var array<string, array{username: string, domain: string, ha1: string, ha1_sha256: string}> */
+    /** @var array<string, array{username: string, domain: string, ha1: string, ha1_sha256: string}> keyed by username@domain */
     public array $subscribers = [];
+
+    /** @var array<string, array{domain: string, attrs: string}> keyed by tenant code */
+    public array $domains = [];
 
     /** @var array<string, list<array{priority: int, app: string, appdata: string}>> */
     public array $extens = [];
@@ -32,7 +35,7 @@ class FakeNodeDatabases
 
     public bool $corruptReadBack = false;
 
-    /** @var array<string, array{context: string, mailbox: string, password: string, fullname: string}> */
+    /** @var array<string, array{context: string, mailbox: string, password: string, fullname: string}> keyed by mailbox@context */
     public array $mailboxes = [];
 
     /** Asterisk does not see what the database holds, e.g. its realtime connection is down. */
@@ -69,7 +72,7 @@ function fakeNode(): FakeNodeDatabases
 
         public function hasMailbox(PbxNode $node, string $mailbox, string $context): bool
         {
-            return ! $this->store->asteriskBlind && ($this->store->mailboxes[$mailbox]['context'] ?? null) === $context;
+            return ! $this->store->asteriskBlind && isset($this->store->mailboxes["{$mailbox}@{$context}"]);
         }
     });
 
@@ -98,18 +101,18 @@ function fakeNode(): FakeNodeDatabases
             return $this->store->extens[$exten] ?? [];
         }
 
-        public function replaceMailbox(PbxNode $node, string $mailbox, ?array $box): void
+        public function replaceMailbox(PbxNode $node, string $context, string $mailbox, ?array $box): void
         {
-            unset($this->store->mailboxes[$mailbox]);
+            unset($this->store->mailboxes["{$mailbox}@{$context}"]);
 
             if ($box !== null) {
-                $this->store->mailboxes[$mailbox] = $box;
+                $this->store->mailboxes["{$mailbox}@{$context}"] = $box;
             }
         }
 
-        public function mailbox(PbxNode $node, string $mailbox): ?array
+        public function mailbox(PbxNode $node, string $context, string $mailbox): ?array
         {
-            return $this->store->mailboxes[$mailbox] ?? null;
+            return $this->store->mailboxes["{$mailbox}@{$context}"] ?? null;
         }
     });
 
@@ -120,18 +123,18 @@ function fakeNode(): FakeNodeDatabases
             parent::__construct($connections);
         }
 
-        public function replaceSubscriber(PbxNode $node, string $username, ?array $subscriber): void
+        public function replaceSubscriber(PbxNode $node, string $username, string $domain, ?array $subscriber): void
         {
-            unset($this->store->subscribers[$username]);
+            unset($this->store->subscribers["{$username}@{$domain}"]);
 
             if ($subscriber !== null) {
-                $this->store->subscribers[$username] = $subscriber;
+                $this->store->subscribers["{$username}@{$domain}"] = $subscriber;
             }
         }
 
-        public function subscribers(PbxNode $node, string $username): array
+        public function subscribers(PbxNode $node, string $username, string $domain): array
         {
-            $row = $this->store->subscribers[$username] ?? null;
+            $row = $this->store->subscribers["{$username}@{$domain}"] ?? null;
 
             if ($row !== null && $this->store->corruptReadBack) {
                 $row['ha1'] = 'tampered';
@@ -140,7 +143,25 @@ function fakeNode(): FakeNodeDatabases
             return $row === null ? [] : [$row];
         }
 
-        public function registrations(PbxNode $node, array $usernames): array
+        public function replaceDomain(PbxNode $node, string $tenantCode, ?array $row): void
+        {
+            if ($this->store->failWith !== null) {
+                throw $this->store->failWith;
+            }
+
+            unset($this->store->domains[$tenantCode]);
+
+            if ($row !== null) {
+                $this->store->domains[$tenantCode] = $row;
+            }
+        }
+
+        public function domain(PbxNode $node, string $tenantCode): ?array
+        {
+            return $this->store->domains[$tenantCode] ?? null;
+        }
+
+        public function registrations(PbxNode $node, string $domain, array $usernames): array
         {
             if ($this->store->locationUnreachable) {
                 throw new RuntimeException('SQLSTATE[HY000] [2002] Connection timed out');
@@ -165,14 +186,14 @@ function applyPendingRevisions(): void
 }
 
 /**
- * The signed-in admin of a tenant with prefix 20 on a node.
+ * The signed-in admin of a tenant with code 1020 on a node.
  *
  * @return array{Tenant, TenantPbxAssignment}
  */
 function provisioningTenant(?TenantPbxAssignment $assignment = null): array
 {
     $user = signIn();
-    $assignment ??= TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment ??= TenantPbxAssignment::factory()->code('1020')->create();
     TenantMembership::withoutTenantScope()->create(['tenant_id' => $assignment->tenant_id, 'user_id' => $user->id, 'role' => TenantRole::Admin]);
 
     return [$assignment->tenant, $assignment];

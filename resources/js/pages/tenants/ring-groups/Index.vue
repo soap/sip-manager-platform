@@ -140,8 +140,8 @@ function remove(group: RingGroup): void {
         <Alert v-if="!hasNode">
             <AlertTitle>No PBX node yet</AlertTitle>
             <AlertDescription>
-                A platform admin places this tenant on a node and gives it a
-                prefix before ring groups can be created.
+                A platform admin places this tenant on a node before ring groups
+                can be created.
             </AlertDescription>
         </Alert>
 
@@ -149,8 +149,8 @@ function remove(group: RingGroup): void {
             <CardHeader>
                 <CardTitle>New ring group</CardTitle>
                 <CardDescription>
-                    The number is in the tenant's prefix, like an extension;
-                    ring groups usually take the 500s.
+                    A number of the tenant, like an extension; ring groups
+                    usually take the 500s.
                 </CardDescription>
             </CardHeader>
             <CardContent>

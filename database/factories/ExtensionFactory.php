@@ -2,7 +2,6 @@
 
 namespace Database\Factories;
 
-use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Models\DialNumber;
@@ -54,19 +53,14 @@ class ExtensionFactory extends Factory
     }
 
     /**
-     * An extension of the assignment's tenant on its node, numbered with the tenant's prefix.
+     * An extension of the assignment's tenant on its node.
      */
     public function on(TenantPbxAssignment $assignment): static
     {
-        return $this->state(function () use ($assignment): array {
-            $prefix = TenantNumberRange::query()->where('tenant_id', $assignment->tenant_id)->value('prefix') ?? '20';
-
-            return [
-                'tenant_id' => $assignment->tenant_id,
-                'pbx_node_id' => $assignment->pbx_node_id,
-                'extension_number' => $prefix.str_pad((string) fake()->unique()->numberBetween(0, 999), 3, '0', STR_PAD_LEFT),
-            ];
-        });
+        return $this->state(fn (): array => [
+            'tenant_id' => $assignment->tenant_id,
+            'pbx_node_id' => $assignment->pbx_node_id,
+        ]);
     }
 
     public function disabled(): static

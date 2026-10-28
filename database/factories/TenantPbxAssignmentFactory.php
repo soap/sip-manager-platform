@@ -4,7 +4,6 @@ namespace Database\Factories;
 
 use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Models\PbxNode;
-use App\Modules\Nodes\Models\TenantNumberRange;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -32,24 +31,11 @@ class TenantPbxAssignmentFactory extends Factory
     }
 
     /**
-     * Gives the tenant the lowest free prefix on the node.
+     * A new tenant with the code, e.g. 1020: its numbers are 1020<number> in the dialplan.
      */
-    public function configure(): static
+    public function code(string $code): static
     {
-        return $this->afterCreating(function (TenantPbxAssignment $assignment): void {
-            TenantNumberRange::query()->create([
-                'tenant_id' => $assignment->tenant_id,
-                'pbx_node_id' => $assignment->pbx_node_id,
-                'prefix' => TenantNumberRange::nextFreePrefix($assignment->pbx_node_id),
-            ]);
-        });
-    }
-
-    public function prefix(string $prefix): static
-    {
-        return $this->afterCreating(function (TenantPbxAssignment $assignment) use ($prefix): void {
-            TenantNumberRange::query()->where('tenant_id', $assignment->tenant_id)->update(['prefix' => $prefix]);
-        });
+        return $this->state(fn (): array => ['tenant_id' => Tenant::factory()->state(['code' => $code])]);
     }
 
     public function suspended(): static

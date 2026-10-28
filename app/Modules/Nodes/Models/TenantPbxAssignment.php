@@ -12,13 +12,12 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
  * The node a tenant's phones live on: its primary PBX (one per tenant in the MVP; a node hosts
- * many tenants). The tenant's numbers there are its TenantNumberRange. Platform admins manage
- * assignments; they are not tenant-scoped.
+ * many tenants). The node serves the tenant's SIP domain while the assignment exists. Platform
+ * admins manage assignments; they are not tenant-scoped.
  *
  * @property int $id
  * @property string $tenant_id
@@ -33,6 +32,9 @@ class TenantPbxAssignment extends Model
 {
     /** @use HasFactory<TenantPbxAssignmentFactory> */
     use HasFactory;
+
+    /** The morph name in config_revisions and provisioning_operations (registered in AppServiceProvider). */
+    public const MORPH = 'assignment';
 
     protected $attributes = [
         'status' => 'active',
@@ -59,16 +61,6 @@ class TenantPbxAssignment extends Model
     public function node(): BelongsTo
     {
         return $this->belongsTo(PbxNode::class, 'pbx_node_id');
-    }
-
-    /**
-     * The tenant's prefix on this node.
-     *
-     * @return HasOne<TenantNumberRange, $this>
-     */
-    public function numberRange(): HasOne
-    {
-        return $this->hasOne(TenantNumberRange::class, 'tenant_id', 'tenant_id');
     }
 
     /**

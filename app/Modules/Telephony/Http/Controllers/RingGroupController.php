@@ -34,7 +34,7 @@ class RingGroupController extends Controller
                 'provisioning' => $operations->get($group->id),
             ]),
             ...$this->formOptions(),
-            'hasNode' => $tenant->numberRange()->exists(),
+            'hasNode' => $tenant->pbxAssignment()->exists(),
             'nextNumber' => $ringGroups->nextFreeNumber(),
             'canManage' => $request->user()->can('manageExtensions', $tenant),
             'provisioningStalled' => $health->stalledFor($tenant->id),

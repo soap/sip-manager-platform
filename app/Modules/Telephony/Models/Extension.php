@@ -18,8 +18,8 @@ use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Carbon;
 
 /**
- * A tenant's internal number. The number is the tenant's prefix and three digits (e.g. 20101),
- * registered in dial_numbers, and doubles as the SIP username of its phone on the node.
+ * A tenant's internal number (e.g. 101), registered in dial_numbers. It doubles as the SIP username
+ * of its phone in the tenant's SIP domain, so other tenants may have the same number.
  *
  * @property int $id
  * @property string $tenant_id
@@ -66,14 +66,6 @@ class Extension extends Model
     public static function newVoicemailPin(): string
     {
         return str_pad((string) random_int(0, 10 ** self::VOICEMAIL_PIN_LENGTH - 1), self::VOICEMAIL_PIN_LENGTH, '0', STR_PAD_LEFT);
-    }
-
-    /**
-     * The voicemail context of the extension's tenant: "t" and its prefix (plan v0.2 §6.2).
-     */
-    public function voicemailContext(): string
-    {
-        return 't'.substr($this->extension_number, 0, 2);
     }
 
     public function hasVoicemail(): bool

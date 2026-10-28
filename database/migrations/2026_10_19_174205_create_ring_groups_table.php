@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->foreignUlid('tenant_id')->constrained()->cascadeOnDelete();
             $table->foreignId('pbx_node_id')->constrained()->restrictOnDelete();
-            // in the tenant's prefix and registered in dial_numbers
+            // a number of the tenant, registered in dial_numbers
             $table->string('number', 10);
             $table->string('name');
             // ring_all: every member at once; sequential: one after another in position order

@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('extensions', function (Blueprint $table) {
             $table->id();
             $table->foreignUlid('tenant_id')->constrained()->cascadeOnDelete();
-            // the node the number lives on; every tenant on a node shares its SIP domain and dialplan
+            // the node the number lives on; the number is unique within the tenant only (plan D6)
             $table->foreignId('pbx_node_id')->constrained()->restrictOnDelete();
             $table->string('extension_number', 10);
             $table->string('display_name');
@@ -21,7 +21,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['tenant_id', 'extension_number']);
-            $table->unique(['pbx_node_id', 'extension_number']);
+            $table->index('pbx_node_id');
         });
     }
 

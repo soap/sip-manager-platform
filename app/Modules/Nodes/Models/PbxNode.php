@@ -4,6 +4,7 @@ namespace App\Modules\Nodes\Models;
 
 use App\Modules\Nodes\Enums\NodeSecretKind;
 use App\Modules\Nodes\Policies\PbxNodePolicy;
+use App\Modules\Tenancy\Models\Tenant;
 use Database\Factories\PbxNodeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
@@ -31,7 +32,7 @@ use Illuminate\Support\Carbon;
  * @property array{public: string|null, public_ipv6: string|null, private: string|null, management: string|null} $addresses
  * @property array{opensips: array<string, mixed>|null, asterisk: array<string, mixed>|null} $services
  * @property array<string, array<string, mixed>> $endpoints opensips_db, asterisk_db, ami and ari, without passwords
- * @property array{entry_context: string, managed_context: string, opensips_endpoint: string}|null $dialplan
+ * @property array{entry_context: string, managed_context: string, opensips_endpoint: string, tenant_routing?: string, tenant_code_digits?: int}|null $dialplan
  * @property string|null $credentials_version Version of the secrets held, as the deployer names it
  * @property array<string, array{ok: bool, message: string}>|null $connection_checks
  * @property Carbon|null $checked_at
@@ -139,14 +140,27 @@ class PbxNode extends Model
     }
 
     /**
-     * Where a phone registers: the node's SIP domain (also the realm) and port.
-     *
-     * @return array{domain: string|null, port: int, transports: list<string>}
+     * Whether the node serves a SIP domain per tenant (plan D6): OpenSIPS knows the tenants from
+     * its domain table and Asterisk sees every number as <tenant code><number>. Nodes installed
+     * before that serve one shared domain and cannot take tenants' numbers.
      */
-    public function sipServer(): array
+    public function hasTenantDomains(): bool
+    {
+        return ($this->dialplan['tenant_routing'] ?? null) === 'domain'
+            && (int) ($this->dialplan['tenant_code_digits'] ?? 0) === Tenant::CODE_DIGITS;
+    }
+
+    /**
+     * Where a phone of the tenant registers: the tenant's SIP domain (also the realm), and the
+     * node itself as outbound proxy for phones whose domain is not in DNS yet.
+     *
+     * @return array{domain: string, proxy: string|null, port: int, transports: list<string>}
+     */
+    public function sipServer(Tenant $tenant): array
     {
         return [
-            'domain' => $this->sip_domain,
+            'domain' => $tenant->sip_domain,
+            'proxy' => $this->sip_domain ?? $this->addresses['public'] ?? null,
             'port' => (int) ($this->services['opensips']['sip_port'] ?? 5060),
             'transports' => array_values($this->services['opensips']['transports'] ?? ['udp']),
         ];

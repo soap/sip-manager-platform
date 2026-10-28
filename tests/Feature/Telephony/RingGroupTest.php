@@ -16,14 +16,14 @@ use App\Modules\Tenancy\Models\TenantMembership;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /**
- * A tenant with prefix 20 on a node, two extensions 20101 and 20102, and the signed-in user in the role.
+ * A tenant with code 1020 on a node, two extensions 20101 and 20102, and the signed-in user in the role.
  *
  * @return array{Tenant, TenantPbxAssignment, Extension, Extension}
  */
 function ringGroupTenant(TenantRole $role = TenantRole::Admin): array
 {
     $user = signIn();
-    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment = TenantPbxAssignment::factory()->code('1020')->create();
     TenantMembership::withoutTenantScope()->create(['tenant_id' => $assignment->tenant_id, 'user_id' => $user->id, 'role' => $role]);
     $first = Extension::factory()->on($assignment)->create(['extension_number' => '20101', 'display_name' => 'Anna']);
     $second = Extension::factory()->on($assignment)->create(['extension_number' => '20102', 'display_name' => 'Ben']);
@@ -59,7 +59,7 @@ it('creates a ring group with ordered members and requests provisioning', functi
 
     expect($group->members->pluck('extension_number')->all())->toBe(['20102', '20101'])
         ->and(DialNumber::withoutTenantScope()->where('number', '20500')->value('owner_type'))->toBe(RingGroup::MORPH)
-        ->and(ConfigRevision::query()->where('target', 'number:20500')->exists())->toBeTrue()
+        ->and(ConfigRevision::query()->where('target', 'number:102020500')->exists())->toBeTrue()
         ->and(ProvisioningOperation::query()->where('aggregate_type', RingGroup::MORPH)->value('type'))->toBe(OperationType::RingGroupCreated)
         ->and(AuditLog::query()->where('action', 'ring_group.created')->value('tenant_id'))->toBe($tenant->id);
 });
@@ -69,8 +69,8 @@ it('shares the number space with extensions', function () {
 
     $this->post(route('tenant.ring-groups.store', $tenant), ringGroupInput(['number' => '20101']))
         ->assertSessionHasErrors(['number' => 'This number is already in use.']);
-    $this->post(route('tenant.ring-groups.store', $tenant), ringGroupInput(['number' => '21500']))
-        ->assertSessionHasErrors(['number' => 'Use a number from 20000–20999.']);
+    $this->post(route('tenant.ring-groups.store', $tenant), ringGroupInput(['number' => '81500']))
+        ->assertSessionHasErrors(['number' => 'Use 2 to 5 digits, not starting with 0, 8 or 9, and not a three-digit number starting with 1.']);
 
     $this->post(route('tenant.ring-groups.store', $tenant), ringGroupInput());
     $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20500', 'display_name' => 'X'])
@@ -79,7 +79,7 @@ it('shares the number space with extensions', function () {
 
 it('accepts only extensions and failovers of the tenant', function (Closure $input, string $field) {
     [$tenant] = ringGroupTenant();
-    $other = Extension::factory()->on(TenantPbxAssignment::factory()->prefix('21')->create())->create();
+    $other = Extension::factory()->on(TenantPbxAssignment::factory()->code('1021')->create())->create();
 
     $this->post(route('tenant.ring-groups.store', $tenant), ringGroupInput($input($other)))
         ->assertSessionHasErrors($field);
@@ -137,7 +137,7 @@ it('recompiles the groups of an extension that is disabled or deleted', function
         ->whereHas('operations', fn ($query) => $query->where('type', OperationType::DependencyChanged))
         ->pluck('target')->sort()->values()->all();
 
-    expect($dependencyTargets())->toBe(['number:20500', 'number:20501']);
+    expect($dependencyTargets())->toBe(['number:102020500', 'number:102020501']);
 
     $this->delete(route('tenant.extensions.destroy', [$tenant, $first->id]));
 
@@ -181,7 +181,7 @@ it('lists ring groups with their members, failover and provisioning state', func
         ->assertInertia(fn (Assert $page) => $page->component('tenants/ring-groups/Index')
             ->where('ringGroups.0.members.0.number', '20102')
             ->where('ringGroups.0.failover', 'Extension 20101')
-            ->where('nextNumber', '20501')
+            ->where('nextNumber', '500')
             ->where('canManage', false)
             ->has('extensions', 2));
 });
@@ -197,7 +197,7 @@ it('lets only owners and admins change ring groups', function () {
 
 it('does not reach the ring groups of another tenant', function () {
     [$tenant] = ringGroupTenant();
-    $other = RingGroup::factory()->on(TenantPbxAssignment::factory()->prefix('21')->create())->create(['number' => '21500']);
+    $other = RingGroup::factory()->on(TenantPbxAssignment::factory()->code('1021')->create())->create(['number' => '21500']);
 
     $this->get(route('tenant.ring-groups.edit', [$tenant, $other->id]))->assertNotFound();
     $this->delete(route('tenant.ring-groups.destroy', [$tenant, $other->id]))->assertNotFound();

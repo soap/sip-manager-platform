@@ -5,6 +5,10 @@ namespace App\Modules\Provisioning\Compiler;
 /**
  * What a number should look like on its node: the OpenSIPS subscriber, the dialplan priorities of
  * its exten in the managed context and its voicemail box (null or empty = none).
+ *
+ * The number is the exten, tenant code first (1042101); the subscriber and the mailbox belong to
+ * the tenant's number (101) in its SIP domain and voicemail context, which say where to write or
+ * remove them. Without a tenant (it was deleted) only the exten is known.
  */
 final readonly class CompiledNumber
 {
@@ -19,6 +23,9 @@ final readonly class CompiledNumber
         public ?array $subscriber,
         public array $dialplan,
         public ?array $voicemail = null,
+        public ?string $username = null,
+        public ?string $sipDomain = null,
+        public ?string $voicemailContext = null,
     ) {}
 
     /**

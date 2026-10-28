@@ -2,6 +2,7 @@
 
 namespace App\Modules\Telephony\Http\Requests;
 
+use App\Modules\Telephony\NumberAllocator;
 use App\Modules\Tenancy\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -21,8 +22,7 @@ class StoreExtensionRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // five digits: the tenant's prefix (20–89, checked by the action) and three more
-            'extension_number' => ['required', 'string', 'regex:/^[2-8][0-9]{4}$/'],
+            'extension_number' => ['required', 'string', 'regex:'.NumberAllocator::PATTERN],
             'display_name' => ['required', 'string', 'max:100'],
         ];
     }
@@ -33,7 +33,7 @@ class StoreExtensionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'extension_number.regex' => 'Use five digits: the tenant\'s prefix and three more.',
+            'extension_number.regex' => NumberAllocator::RULE_MESSAGE,
         ];
     }
 }

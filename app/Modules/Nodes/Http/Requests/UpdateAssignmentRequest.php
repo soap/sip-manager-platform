@@ -20,16 +20,7 @@ class UpdateAssignmentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'prefix' => StoreAssignmentRequest::prefixRules(),
             'status' => ['required', Rule::enum(AssignmentStatus::class)],
         ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return StoreAssignmentRequest::prefixMessages();
     }
 }

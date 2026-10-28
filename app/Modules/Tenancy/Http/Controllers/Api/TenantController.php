@@ -20,21 +20,21 @@ class TenantController extends Controller
 
         /** @var User $user */
         $user = $request->user();
-        $assignment = $tenant->pbxAssignment()->with(['node', 'numberRange'])->first();
+        $assignment = $tenant->pbxAssignment()->with(['node'])->first();
 
         return response()->json(['data' => [
             'id' => $tenant->id,
             'name' => $tenant->name,
             'slug' => $tenant->slug,
+            'code' => $tenant->code,
+            'sip_domain' => $tenant->sip_domain,
             'status' => $tenant->status->value,
             'role' => $user->roleIn($tenant)?->value,
             'token_abilities' => $user->currentAccessToken()->abilities ?? [],
-            'pbx' => $assignment?->numberRange === null ? null : [
+            'pbx' => $assignment === null ? null : [
                 'status' => $assignment->status->value,
-                'prefix' => $assignment->numberRange->prefix,
-                'numbers' => $assignment->numberRange->label(),
                 'voicemail' => $assignment->node->hasVoicemail(),
-                'sip_server' => $assignment->node->sipServer(),
+                'sip_server' => $assignment->node->sipServer($tenant),
             ],
         ]]);
     }

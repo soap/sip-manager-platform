@@ -49,6 +49,30 @@ it('creates a tenant with an invited owner', function () {
     Notification::assertSentTo($owner, ResetPassword::class);
 });
 
+it('gives every new tenant the next code and its own SIP domain', function () {
+    Notification::fake();
+    config(['services.sip.tenant_domain_suffix' => 'sip.example.net']);
+    signIn(User::factory()->platformAdmin()->create());
+    Tenant::factory()->create(['code' => '1041']);
+
+    $this->post(route('admin.tenants.store'), ['name' => 'Acme', 'slug' => 'acme', 'owner_name' => 'O', 'owner_email' => 'o@example.com'])
+        ->assertSessionHasNoErrors();
+
+    expect(Tenant::query()->where('slug', 'acme')->sole())
+        ->code->toBe('1042')
+        ->sip_domain->toBe('acme.sip.example.net')
+        ->and(AuditLog::query()->where('action', 'tenant.created')->value('summary'))
+        ->toMatchArray(['code' => '1042', 'sip_domain' => 'acme.sip.example.net']);
+});
+
+it('starts the tenant codes at 1000', function () {
+    expect(Tenant::nextCode())->toBe('1000');
+
+    Tenant::factory()->create(['code' => '9999']);
+
+    expect(Tenant::nextCode())->toBeNull();
+});
+
 it('validates the slug of a new tenant', function (string $slug) {
     signIn(User::factory()->platformAdmin()->create());
     Tenant::factory()->create(['slug' => 'taken']);

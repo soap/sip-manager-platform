@@ -38,6 +38,11 @@ return [
         'token' => env('SIP_DEPLOYER_TOKEN'),
     ],
 
+    // every tenant's SIP domain is <slug>.<suffix>; a wildcard DNS record points it at the nodes
+    'sip' => [
+        'tenant_domain_suffix' => env('SIP_TENANT_DOMAIN_SUFFIX', 'sip.example.com'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

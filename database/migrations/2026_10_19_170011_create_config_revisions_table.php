@@ -14,8 +14,9 @@ return new class extends Migration
             $table->foreignId('pbx_node_id')->constrained()->restrictOnDelete();
             // increasing per node
             $table->unsignedBigInteger('revision_number');
-            // what the revision brings to the node, e.g. "number:20101"; a newer revision of the
-            // same target supersedes an older one that has not been applied yet
+            // what the revision brings to the node, e.g. "number:10421001" (tenant code and number)
+            // or "domain:1042"; a newer revision of the same target supersedes an older one that
+            // has not been applied yet
             $table->string('target');
             // the change that asked for it (e.g. extension 12), kept after the extension is deleted
             $table->string('aggregate_type');

@@ -19,9 +19,9 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Creates, changes and deletes the extensions of the tenant in the context. A number is the
- * tenant's two-digit prefix followed by three digits (e.g. 20101); it cannot change later, since
- * phones register with it. Every change that reaches the node requests provisioning in the same
- * transaction, so the node follows the desired state.
+ * tenant's own (e.g. 201, see NumberAllocator); it cannot change later, since phones register with
+ * it. Every change that reaches the node requests provisioning in the same transaction, so the node
+ * follows the desired state.
  */
 class ManageExtensions
 {
@@ -220,11 +220,11 @@ class ManageExtensions
     }
 
     /**
-     * The lowest free number of the tenant from PP001 up, to suggest for the next extension.
+     * The lowest free number of the tenant from 201 up, to suggest for the next extension.
      */
     public function nextFreeNumber(): ?string
     {
-        return $this->numbers->nextFree(1);
+        return $this->numbers->nextFree(201);
     }
 
     private function provision(Extension $extension, OperationType $type): ProvisioningOperation

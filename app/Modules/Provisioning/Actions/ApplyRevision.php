@@ -14,15 +14,19 @@ use App\Modules\Provisioning\ErrorClassifier;
 use App\Modules\Provisioning\Exceptions\ProvisioningRejected;
 use App\Modules\Provisioning\Exceptions\ReadBackMismatch;
 use App\Modules\Provisioning\Models\ConfigRevision;
+use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Steps 4–8 of the pipeline (plan v0.2 §6.1) for one revision: compile the number's desired state
+ * Steps 4–8 of the pipeline (plan v0.2 §6.1) for one revision: compile the target's desired state
  * as it is now, validate it against the node, write Asterisk first and OpenSIPS last (so a phone
  * cannot register before its dialplan is ready), read both back and compare checksums, then ask
  * Asterisk over AMI whether it sees the dialplan and the mailbox. Ends applied, retrying with backoff,
  * or failed.
+ *
+ * A target is a number (exten, tenant code first) or a tenant's SIP domain (its row in the OpenSIPS
+ * domain table, which tells OpenSIPS the tenant code of the domain's phones).
  */
 class ApplyRevision
 {
@@ -57,16 +61,16 @@ class ApplyRevision
         $attempt = $this->start($revision);
 
         try {
-            [$compiled, $asterisk] = $this->apply($revision);
+            $result = $this->apply($revision);
         } catch (Throwable $exception) {
             return $this->failed($revision, $attempt, $exception);
         }
 
         $revision->update([
             'status' => RevisionStatus::Applied,
-            'checksum' => $compiled->checksum(),
-            'compiled' => $compiled->withoutSecrets(),
-            'apply_result' => ['read_back' => 'match', 'asterisk' => $asterisk, 'state' => $compiled->state, 'attempt' => $attempt, 'applied_at' => now()->toIso8601String()],
+            'checksum' => $result['checksum'],
+            'compiled' => $result['compiled'],
+            'apply_result' => ['read_back' => 'match', 'asterisk' => $result['asterisk'], 'state' => $result['state'], 'attempt' => $attempt, 'applied_at' => now()->toIso8601String()],
         ]);
         $revision->operations()->update(['status' => OperationStatus::Applied, 'error_code' => null, 'error_message' => null, 'next_attempt_at' => null]);
 
@@ -74,46 +78,110 @@ class ApplyRevision
     }
 
     /**
-     * @return array{CompiledNumber, string} the compiled rows, and whether Asterisk confirmed them
+     * @return array{checksum: string, compiled: array<string, mixed>, state: string, asterisk: string}
      */
     private function apply(ConfigRevision $revision): array
     {
         $node = $revision->node;
         $number = $revision->targetNumber();
+        $domainCode = $revision->targetDomainCode();
 
-        if ($number === null) {
+        if ($number === null && $domainCode === null) {
             throw ProvisioningRejected::because('unknown_target', "Revision {$revision->id} has an unknown target {$revision->target}.");
         }
 
         $this->validateNode($node);
 
-        $compiled = $this->compiler->compile($node, $number);
+        if ($domainCode !== null) {
+            return $this->applyDomain($revision, $domainCode);
+        }
+
+        $compiled = $this->compiler->compile($node, (string) $number);
         $revision->update(['status' => RevisionStatus::Validated, 'validation_report' => ['ok' => true, 'state' => $compiled->state]]);
 
         // shared rows every tenant relies on, written each time so a reinstalled node gets them back
         $this->asterisk->replaceExten($node, NumberCompiler::DENIED_EXTEN, $this->compiler->denied());
 
-        if ($node->hasVoicemail()) {
-            $this->asterisk->replaceExten($node, NumberCompiler::VOICEMAIL_MAIN_EXTEN, $this->compiler->voicemailMain());
-            $this->asterisk->replaceMailbox($node, $number, $compiled->voicemail);
+        $tenant = Tenant::query()->where('code', substr((string) $number, 0, Tenant::CODE_DIGITS))->first();
+
+        if ($tenant !== null) {
+            $this->ensureDomain($node, $tenant);
+
+            if ($node->hasVoicemail()) {
+                $this->asterisk->replaceExten($node, $tenant->routingNumber(NumberCompiler::VOICEMAIL_MAIN_EXTEN), $this->compiler->voicemailMain($tenant));
+            }
         }
 
-        $this->asterisk->replaceExten($node, $number, $compiled->dialplan);
-        $this->openSips->replaceSubscriber($node, $number, $compiled->subscriber);
+        $this->asterisk->replaceExten($node, $compiled->number, $compiled->dialplan);
+
+        $mailboxKnown = $compiled->voicemailContext !== null && $compiled->username !== null && $node->hasVoicemail();
+
+        if ($mailboxKnown) {
+            $this->asterisk->replaceMailbox($node, (string) $compiled->voicemailContext, (string) $compiled->username, $compiled->voicemail);
+        }
+
+        if ($compiled->sipDomain !== null && $compiled->username !== null) {
+            $this->openSips->replaceSubscriber($node, $compiled->username, $compiled->sipDomain, $compiled->subscriber);
+        }
 
         $readBack = new CompiledNumber(
-            $number,
+            $compiled->number,
             $compiled->state,
-            $this->openSips->subscribers($node, $number)[0] ?? null,
-            $this->asterisk->exten($node, $number),
-            $node->hasVoicemail() ? $this->asterisk->mailbox($node, $number) : null,
+            $compiled->sipDomain === null || $compiled->username === null ? null : ($this->openSips->subscribers($node, $compiled->username, $compiled->sipDomain)[0] ?? null),
+            $this->asterisk->exten($node, $compiled->number),
+            $mailboxKnown ? $this->asterisk->mailbox($node, (string) $compiled->voicemailContext, (string) $compiled->username) : null,
         );
 
         if ($readBack->checksum() !== $compiled->checksum()) {
-            throw new ReadBackMismatch("The rows of {$number} read back from {$node->name} differ from those written.");
+            throw new ReadBackMismatch("The rows of {$compiled->number} read back from {$node->name} differ from those written.");
         }
 
-        return [$compiled, $this->confirmWithAsterisk($node, $compiled)];
+        return [
+            'checksum' => $compiled->checksum(),
+            'compiled' => $compiled->withoutSecrets(),
+            'state' => $compiled->state,
+            'asterisk' => $this->confirmWithAsterisk($node, $compiled),
+        ];
+    }
+
+    /**
+     * Writes the tenant's domain row, or removes it once the tenant is off the node.
+     *
+     * @return array{checksum: string, compiled: array<string, mixed>, state: string, asterisk: string}
+     */
+    private function applyDomain(ConfigRevision $revision, string $tenantCode): array
+    {
+        $node = $revision->node;
+        $row = $this->compiler->domain($node, $tenantCode);
+        $state = $row === null ? 'removed' : 'active';
+
+        $revision->update(['status' => RevisionStatus::Validated, 'validation_report' => ['ok' => true, 'state' => $state]]);
+
+        $this->openSips->replaceDomain($node, $tenantCode, $row);
+
+        if ($this->openSips->domain($node, $tenantCode) !== $row) {
+            throw new ReadBackMismatch("The domain of tenant {$tenantCode} read back from {$node->name} differs from the one written.");
+        }
+
+        return [
+            'checksum' => hash('sha256', (string) json_encode($row)),
+            'compiled' => ['domain' => $row],
+            'state' => $state,
+            'asterisk' => 'unchecked',
+        ];
+    }
+
+    /**
+     * The tenant's phones need its domain on the node; written with each of its numbers, so a
+     * reinstalled node gets it back with the first number written again.
+     */
+    private function ensureDomain(PbxNode $node, Tenant $tenant): void
+    {
+        $row = $this->compiler->domain($node, $tenant->code);
+
+        if ($row !== null && $this->openSips->domain($node, $tenant->code) !== $row) {
+            $this->openSips->replaceDomain($node, $tenant->code, $row);
+        }
     }
 
     /**
@@ -158,6 +226,10 @@ class ApplyRevision
 
         if (! $node->hasOpenSips() || ! in_array('realtime', $node->asteriskFeatures(), true)) {
             throw ProvisioningRejected::because('node_capability', "Node {$node->name} needs OpenSIPS and Asterisk with realtime.");
+        }
+
+        if (! $node->hasTenantDomains()) {
+            throw ProvisioningRejected::because('node_capability', "Node {$node->name} serves one shared SIP domain; reinstall OpenSIPS and Asterisk from SIP Deployer, then sync.");
         }
     }
 

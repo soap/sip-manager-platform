@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\ApiToken;
@@ -39,6 +40,7 @@ class AppServiceProvider extends ServiceProvider
         Relation::morphMap([
             Extension::MORPH => Extension::class,
             RingGroup::MORPH => RingGroup::class,
+            TenantPbxAssignment::MORPH => TenantPbxAssignment::class,
         ]);
 
         Sanctum::usePersonalAccessTokenModel(ApiToken::class);

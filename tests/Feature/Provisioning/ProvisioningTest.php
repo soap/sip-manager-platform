@@ -27,10 +27,11 @@ use Inertia\Testing\AssertableInertia as Assert;
 it('creates an extension with a SIP account shown once and requests provisioning', function () {
     [$tenant, $assignment] = provisioningTenant();
 
-    $response = $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception'])
+    $response = $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception'])
         ->assertSessionHasNoErrors()
-        ->assertInertiaFlash('sipCredential.username', '20101')
-        ->assertInertiaFlash('sipCredential.domain', $assignment->node->sip_domain);
+        ->assertInertiaFlash('sipCredential.username', '201')
+        ->assertInertiaFlash('sipCredential.domain', $tenant->sip_domain)
+        ->assertInertiaFlash('sipCredential.proxy', $assignment->node->sip_domain);
 
     $credential = SipCredential::withoutTenantScope()->sole();
     $password = $credential->secret;
@@ -41,7 +42,7 @@ it('creates an extension with a SIP account shown once and requests provisioning
 
     $revision = ConfigRevision::query()->sole();
     expect($revision)
-        ->target->toBe('number:20101')
+        ->target->toBe('number:1020201')
         ->status->toBe(RevisionStatus::Draft)
         ->revision_number->toBe(1)
         ->and(ProvisioningOperation::query()->sole())
@@ -60,7 +61,7 @@ it('makes SIP passwords without characters that look alike', function () {
 it('relays the outbox to the provisioning queue once', function () {
     Queue::fake();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     $this->artisan('provisioning:relay')->assertSuccessful();
     $this->artisan('provisioning:relay')->assertSuccessful();
@@ -72,23 +73,26 @@ it('relays the outbox to the provisioning queue once', function () {
 
 it('writes an active extension to OpenSIPS and the dialplan, and reads it back', function () {
     $node = fakeNode();
-    [$tenant, $assignment] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    [$tenant] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     $password = SipCredential::withoutTenantScope()->sole()->secret;
-    $domain = $assignment->node->sip_domain;
+    $domain = $tenant->sip_domain;
 
     applyPendingRevisions();
 
-    expect($node->subscribers['20101'])->toBe([
-        'username' => '20101',
+    // the account lives in the tenant's own SIP domain, which is also its realm
+    expect($node->subscribers["201@{$domain}"])->toBe([
+        'username' => '201',
         'domain' => $domain,
-        'ha1' => md5("20101:{$domain}:{$password}"),
-        'ha1_sha256' => hash('sha256', "20101:{$domain}:{$password}"),
+        'ha1' => md5("201:{$domain}:{$password}"),
+        'ha1_sha256' => hash('sha256', "201:{$domain}:{$password}"),
     ])
-        ->and($node->extens['20101'])->toBe([
-            ['priority' => 1, 'app' => 'GotoIf', 'appdata' => '$["${CALLERID(num):0:2}" != "20"]?denied,1'],
-            ['priority' => 2, 'app' => 'Dial', 'appdata' => 'PJSIP/20101@opensips,30'],
-            ['priority' => 3, 'app' => 'Hangup', 'appdata' => ''],
+        // OpenSIPS knows the tenant code of the domain's phones from its domain row
+        ->and($node->domains['1020'])->toBe(['domain' => $domain, 'attrs' => '1020'])
+        // and Asterisk sees the number with the tenant code first, in both directions
+        ->and($node->extens['1020201'])->toBe([
+            ['priority' => 1, 'app' => 'Dial', 'appdata' => 'PJSIP/1020201@opensips,30'],
+            ['priority' => 2, 'app' => 'Hangup', 'appdata' => ''],
         ])
         ->and($node->extens['denied'])->toBe([
             ['priority' => 1, 'app' => 'Playback', 'appdata' => 'ss-noservice'],
@@ -98,27 +102,32 @@ it('writes an active extension to OpenSIPS and the dialplan, and reads it back',
     $revision = ConfigRevision::query()->sole();
     expect($revision->status)->toBe(RevisionStatus::Applied)
         ->and($revision->checksum)->toHaveLength(64)
-        ->and($revision->compiled['subscriber'])->toBe(['username' => '20101', 'domain' => $domain])
-        ->and(json_encode($revision->compiled))->not->toContain(md5("20101:{$domain}:{$password}"))
+        ->and($revision->compiled['subscriber'])->toBe(['username' => '201', 'domain' => $domain])
+        ->and(json_encode($revision->compiled))->not->toContain(md5("201:{$domain}:{$password}"))
         ->and(ProvisioningOperation::query()->sole()->status)->toBe(OperationStatus::Applied);
 });
 
-it('lets each tenant reach only its own prefix', function () {
+it('keeps the same number of two tenants on one node apart', function () {
     $node = fakeNode();
-    $first = TenantPbxAssignment::factory()->prefix('20')->create();
-    $second = TenantPbxAssignment::factory()->prefix('21')->create(['pbx_node_id' => $first->pbx_node_id]);
+    $first = TenantPbxAssignment::factory()->code('1020')->create();
+    $second = TenantPbxAssignment::factory()->code('1021')->create(['pbx_node_id' => $first->pbx_node_id]);
+    Extension::factory()->on($first)->create(['extension_number' => '201']);
     [$tenant] = provisioningTenant($second);
 
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '21001', 'display_name' => 'Sales']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Sales']);
+    $this->post(route('tenant.extensions.reapply', [$tenant, Extension::withoutTenantScope()->where('tenant_id', $tenant->id)->value('id')]));
+    DB::transaction(fn () => app(RequestProvisioning::class)->forNumber($first->pbx_node_id, $first->tenant_id, '201', OperationType::Reapplied, Extension::MORPH, 1));
     applyPendingRevisions();
 
-    expect($node->extens['21001'][0]['appdata'])->toBe('$["${CALLERID(num):0:2}" != "21"]?denied,1');
+    expect(array_keys($node->subscribers))->toEqualCanonicalizing(["201@{$first->tenant->sip_domain}", "201@{$tenant->sip_domain}"])
+        ->and($node->extens)->toHaveKeys(['1020201', '1021201'])
+        ->and($node->domains)->toHaveKeys(['1020', '1021']);
 });
 
 it('takes a disabled extension out of service and a deleted one off the node', function () {
     $node = fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     applyPendingRevisions();
     $extension = Extension::withoutTenantScope()->sole();
 
@@ -126,21 +135,21 @@ it('takes a disabled extension out of service and a deleted one off the node', f
     applyPendingRevisions();
 
     // the subscriber stays as a disabled account, which OpenSIPS refuses without a failed authentication for fail2ban
-    expect($node->subscribers['20101'])->toMatchArray(['username' => '20101', 'ha1' => 'disabled', 'ha1_sha256' => 'disabled'])
-        ->and($node->extens['20101'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+    expect($node->subscribers["201@{$tenant->sip_domain}"])->toMatchArray(['username' => '201', 'ha1' => 'disabled', 'ha1_sha256' => 'disabled'])
+        ->and($node->extens['1020201'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
 
     $this->delete(route('tenant.extensions.destroy', [$tenant, $extension->id]));
     applyPendingRevisions();
 
     expect($node->subscribers)->toBe([])
-        ->and($node->extens)->not->toHaveKey('20101')
+        ->and($node->extens)->not->toHaveKey('1020201')
         ->and(ProvisioningOperation::query()->latest('id')->first()->type)->toBe(OperationType::ExtensionDeleted);
 });
 
 it('only provisions a rename when the status changes too', function () {
     fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     $extension = Extension::withoutTenantScope()->sole();
 
     $this->patch(route('tenant.extensions.update', [$tenant, $extension->id]), ['display_name' => 'Front desk', 'status' => 'active', 'version' => 1])
@@ -156,49 +165,50 @@ it('only provisions a rename when the status changes too', function () {
 it('suspends and resumes every number of a tenant with its assignment', function () {
     $node = fakeNode();
     signIn(User::factory()->platformAdmin()->create());
-    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment = TenantPbxAssignment::factory()->code('1020')->create();
     Extension::factory()->on($assignment)->count(2)->create();
     $numbers = Extension::withoutTenantScope()->pluck('extension_number')->all();
 
-    $this->patch(route('admin.assignments.update', $assignment), ['prefix' => '20', 'status' => 'suspended'])->assertSessionHasNoErrors();
+    $this->patch(route('admin.assignments.update', $assignment), ['status' => 'suspended'])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
     expect(ProvisioningOperation::query()->where('type', OperationType::AssignmentChanged)->count())->toBe(2)
         ->and(array_unique(array_column($node->subscribers, 'ha1')))->toBe(['disabled']);
     foreach ($numbers as $number) {
-        expect($node->extens[$number])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+        expect($node->extens["1020{$number}"])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
     }
 
-    $this->patch(route('admin.assignments.update', $assignment), ['prefix' => '20', 'status' => 'active']);
+    $this->patch(route('admin.assignments.update', $assignment), ['status' => 'active']);
     applyPendingRevisions();
 
-    expect(array_keys($node->subscribers))->toEqualCanonicalizing($numbers)
+    expect(array_column($node->subscribers, 'username'))->toEqualCanonicalizing($numbers)
         ->and(array_column($node->subscribers, 'ha1'))->not->toContain('disabled');
 });
 
 it('rotates a SIP password and writes the new digest', function () {
     $node = fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     applyPendingRevisions();
-    $before = $node->subscribers['20101']['ha1'];
+    $account = "201@{$tenant->sip_domain}";
+    $before = $node->subscribers[$account]['ha1'];
     $extension = Extension::withoutTenantScope()->sole();
 
     $this->post(route('tenant.extensions.rotate-credential', [$tenant, $extension->id]))
-        ->assertInertiaFlash('sipCredential.username', '20101');
+        ->assertInertiaFlash('sipCredential.username', '201');
     applyPendingRevisions();
 
     $credential = SipCredential::withoutTenantScope()->sole();
     expect($credential->rotated_at)->not->toBeNull()
-        ->and($node->subscribers['20101']['ha1'])->not->toBe($before)
-        ->and($node->subscribers['20101']['ha1'])->toBe(md5("20101:{$node->subscribers['20101']['domain']}:{$credential->secret}"));
+        ->and($node->subscribers[$account]['ha1'])->not->toBe($before)
+        ->and($node->subscribers[$account]['ha1'])->toBe(md5("201:{$tenant->sip_domain}:{$credential->secret}"));
 });
 
 it('retries a node that cannot be reached with backoff, then fails', function () {
     $node = fakeNode();
     $node->failWith = new QueryException('mariadb', 'delete from extensions', [], new PDOException('SQLSTATE[HY000] [2002] Connection refused'));
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     $revision = ConfigRevision::query()->sole();
 
     expect(app(ApplyRevision::class)->handle($revision->id))->toBe(10)
@@ -221,7 +231,7 @@ it('fails at once when the node refuses the database login', function () {
     $node = fakeNode();
     $node->failWith = new QueryException('mariadb', 'delete from extensions', [], new PDOException("SQLSTATE[HY000] [1045] Access denied for user 'asterisk_manager'@'10.0.0.1' (using password: YES)"));
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBeNull()
         ->and(ProvisioningOperation::query()->sole())
@@ -233,7 +243,7 @@ it('retries when the rows read back differ from those written', function () {
     $node = fakeNode();
     $node->corruptReadBack = true;
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe(10)
         ->and(ProvisioningOperation::query()->sole()->error_code)->toBe('read_back_mismatch');
@@ -242,7 +252,7 @@ it('retries when the rows read back differ from those written', function () {
 it('confirms over AMI that Asterisk sees the written dialplan', function () {
     fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     applyPendingRevisions();
 
@@ -253,20 +263,20 @@ it('retries when Asterisk does not see the rows the database holds', function ()
     $node = fakeNode();
     $node->asteriskBlind = true;
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe(10)
         ->and(ProvisioningOperation::query()->sole())
         ->error_code->toBe('read_back_mismatch')
-        ->error_message->toContain('does not see priorities 1, 2, 3 of 20101 in from-opensips');
+        ->error_message->toContain('does not see priorities 1, 2 of 1020201 in from-opensips');
 });
 
 it('trusts the database read-back on a node without AMI', function () {
     fakeNode();
-    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment = TenantPbxAssignment::factory()->code('1020')->create();
     $assignment->node->update(['endpoints' => collect($assignment->node->endpoints)->except('ami')->all()]);
     [$tenant] = provisioningTenant($assignment);
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     applyPendingRevisions();
 
@@ -279,7 +289,7 @@ it('retries when AMI does not answer and fails when it refuses the login', funct
     fakeNode();
     $this->mock(AmiAdapter::class)->shouldReceive('missingPriorities')->andThrow($exception);
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     expect(app(ApplyRevision::class)->handle(ConfigRevision::query()->sole()->id))->toBe($retryIn)
         ->and(ProvisioningOperation::query()->sole()->error_code)->toBe($errorCode);
@@ -291,10 +301,10 @@ it('retries when AMI does not answer and fails when it refuses the login', funct
 
 it('refuses a node without the realtime feature', function () {
     fakeNode();
-    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment = TenantPbxAssignment::factory()->code('1020')->create();
     $assignment->node->update(['services' => [...$assignment->node->services, 'asterisk' => [...$assignment->node->services['asterisk'], 'features' => ['ami']]]]);
     [$tenant] = provisioningTenant($assignment);
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     applyPendingRevisions();
 
@@ -306,7 +316,7 @@ it('refuses a node without the realtime feature', function () {
 it('lets a newer revision of the same number stand in for an older one', function () {
     $node = fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     $extension = Extension::withoutTenantScope()->sole();
     $this->post(route('tenant.extensions.reapply', [$tenant, $extension->id]));
 
@@ -316,13 +326,13 @@ it('lets a newer revision of the same number stand in for an older one', functio
     expect($older->status)->toBe(RevisionStatus::Superseded)
         ->and($newer->status)->toBe(RevisionStatus::Applied)
         ->and($newer->revision_number)->toBe(2)
-        ->and($node->subscribers)->toHaveKey('20101');
+        ->and($node->subscribers)->toHaveKey("201@{$tenant->sip_domain}");
 });
 
 it('shows the provisioning state of each extension', function () {
     fakeNode();
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     $this->get(route('tenant.extensions.index', $tenant))
         ->assertInertia(fn (Assert $page) => $page
@@ -337,7 +347,7 @@ it('shows the provisioning state of each extension', function () {
 
 it('warns when a change has waited too long and tells which part is not running', function () {
     [$tenant] = provisioningTenant();
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 
     $this->get(route('tenant.extensions.index', $tenant))
         ->assertInertia(fn (Assert $page) => $page->where('provisioningStalled', null));
@@ -358,12 +368,12 @@ it('warns when a change has waited too long and tells which part is not running'
 it('does not count retrying or finished operations, or other tenants, as stalled', function () {
     $node = fakeNode();
     [$tenant] = provisioningTenant();
-    $other = TenantPbxAssignment::factory()->prefix('21')->create();
-    DB::transaction(fn () => app(RequestProvisioning::class)->forNumber($other->pbx_node_id, $other->tenant_id, '21001', OperationType::Reapplied, Extension::MORPH, 1));
+    $other = TenantPbxAssignment::factory()->code('1021')->create();
+    DB::transaction(fn () => app(RequestProvisioning::class)->forNumber($other->pbx_node_id, $other->tenant_id, '201', OperationType::Reapplied, Extension::MORPH, 1));
 
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception']);
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
     $node->failWith = new QueryException('mariadb', 'delete', [], new PDOException('SQLSTATE[HY000] [2002] Connection refused'));
-    app(ApplyRevision::class)->handle(ConfigRevision::query()->where('target', 'number:20101')->value('id'));
+    app(ApplyRevision::class)->handle(ConfigRevision::query()->where('target', 'number:1020201')->value('id'));
     OutboxMessage::query()->update(['dispatched_at' => now()]);
 
     $this->travel(ProvisioningHealth::STALL_SECONDS + 1)->seconds();
@@ -375,48 +385,46 @@ it('does not count retrying or finished operations, or other tenants, as stalled
 it('compiles a ring group that rings all members, then fails over', function () {
     $node = fakeNode();
     [$tenant, $assignment] = provisioningTenant();
-    $first = Extension::factory()->on($assignment)->create(['extension_number' => '20101']);
-    $second = Extension::factory()->on($assignment)->create(['extension_number' => '20102']);
-    $disabled = Extension::factory()->on($assignment)->disabled()->create(['extension_number' => '20103']);
+    $first = Extension::factory()->on($assignment)->create(['extension_number' => '201']);
+    $second = Extension::factory()->on($assignment)->create(['extension_number' => '202']);
+    $disabled = Extension::factory()->on($assignment)->disabled()->create(['extension_number' => '203']);
 
     $this->post(route('tenant.ring-groups.store', $tenant), [
-        'number' => '20500', 'name' => 'Sales', 'strategy' => 'ring_all', 'ring_seconds' => 25,
+        'number' => '500', 'name' => 'Sales', 'strategy' => 'ring_all', 'ring_seconds' => 25,
         'members' => [$first->id, $disabled->id, $second->id], 'failover_type' => 'extension', 'failover_id' => $first->id,
     ])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
-    expect($node->extens['20500'])->toBe([
-        ['priority' => 1, 'app' => 'GotoIf', 'appdata' => '$["${CALLERID(num):0:2}" != "20"]?denied,1'],
-        ['priority' => 2, 'app' => 'Dial', 'appdata' => 'PJSIP/20101@opensips&PJSIP/20102@opensips,25'],
-        ['priority' => 3, 'app' => 'Goto', 'appdata' => '20101,1'],
+    expect($node->extens['1020500'])->toBe([
+        ['priority' => 1, 'app' => 'Dial', 'appdata' => 'PJSIP/1020201@opensips&PJSIP/1020202@opensips,25'],
+        ['priority' => 2, 'app' => 'Goto', 'appdata' => '1020201,1'],
     ])
-        ->and($node->subscribers)->not->toHaveKey('20500');
+        ->and($node->subscribers)->not->toHaveKey("500@{$tenant->sip_domain}");
 });
 
 it('compiles a sequential ring group one member at a time, hanging up at the end', function () {
     $node = fakeNode();
     [$tenant, $assignment] = provisioningTenant();
-    $first = Extension::factory()->on($assignment)->create(['extension_number' => '20101']);
-    $second = Extension::factory()->on($assignment)->create(['extension_number' => '20102']);
+    $first = Extension::factory()->on($assignment)->create(['extension_number' => '201']);
+    $second = Extension::factory()->on($assignment)->create(['extension_number' => '202']);
 
     $this->post(route('tenant.ring-groups.store', $tenant), [
-        'number' => '20500', 'name' => 'Support', 'strategy' => 'sequential', 'ring_seconds' => 10,
+        'number' => '500', 'name' => 'Support', 'strategy' => 'sequential', 'ring_seconds' => 10,
         'members' => [$second->id, $first->id], 'failover_type' => 'hangup',
     ]);
     applyPendingRevisions();
 
-    expect(array_column($node->extens['20500'], 'appdata', 'priority'))->toBe([
-        1 => '$["${CALLERID(num):0:2}" != "20"]?denied,1',
-        2 => 'PJSIP/20102@opensips,10',
-        3 => 'PJSIP/20101@opensips,10',
-        4 => '',
+    expect(array_column($node->extens['1020500'], 'appdata', 'priority'))->toBe([
+        1 => 'PJSIP/1020202@opensips,10',
+        2 => 'PJSIP/1020201@opensips,10',
+        3 => '',
     ]);
 });
 
 it('sends callers of a disabled ring group to denied', function () {
     $node = fakeNode();
     [$tenant, $assignment] = provisioningTenant();
-    $group = RingGroup::factory()->on($assignment)->create(['number' => '20500']);
+    $group = RingGroup::factory()->on($assignment)->create(['number' => '500']);
 
     $this->patch(route('tenant.ring-groups.update', [$tenant, $group->id]), [
         'name' => $group->name, 'strategy' => 'ring_all', 'ring_seconds' => 20, 'members' => [],
@@ -424,15 +432,28 @@ it('sends callers of a disabled ring group to denied', function () {
     ])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
-    expect($node->extens['20500'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+    expect($node->extens['1020500'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+});
+
+it('refuses a node that still serves one shared SIP domain', function () {
+    fakeNode();
+    [$tenant, $assignment] = provisioningTenant();
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
+    $assignment->node->update(['dialplan' => ['entry_context' => 'from-opensips', 'managed_context' => 'managed', 'opensips_endpoint' => 'opensips']]);
+
+    applyPendingRevisions();
+
+    expect(ProvisioningOperation::query()->sole())
+        ->status->toBe(OperationStatus::Failed)
+        ->error_code->toBe('node_capability');
 });
 
 it('returns the same operation for a repeated idempotency key', function () {
     $assignment = TenantPbxAssignment::factory()->create();
 
     [$first, $second] = DB::transaction(fn (): array => [
-        app(RequestProvisioning::class)->forNumber($assignment->pbx_node_id, $assignment->tenant_id, '20101', OperationType::Reapplied, Extension::MORPH, 1, 'key-1'),
-        app(RequestProvisioning::class)->forNumber($assignment->pbx_node_id, $assignment->tenant_id, '20101', OperationType::Reapplied, Extension::MORPH, 1, 'key-1'),
+        app(RequestProvisioning::class)->forNumber($assignment->pbx_node_id, $assignment->tenant_id, '201', OperationType::Reapplied, Extension::MORPH, 1, 'key-1'),
+        app(RequestProvisioning::class)->forNumber($assignment->pbx_node_id, $assignment->tenant_id, '201', OperationType::Reapplied, Extension::MORPH, 1, 'key-1'),
     ]);
 
     expect($second->id)->toBe($first->id)

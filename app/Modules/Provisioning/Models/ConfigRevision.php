@@ -11,9 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
- * One change to bring to a node. It starts as a draft naming its target (e.g. "number:20101"); the
- * apply job compiles the target's desired state at that moment, writes it, reads it back, and fills
- * in what was written. Not tenant-scoped: the apply job works across tenants.
+ * One change to bring to a node. It starts as a draft naming its target: a number as Asterisk knows
+ * it, tenant code first (e.g. "number:1042101"), or a tenant's SIP domain ("domain:1042"). The apply
+ * job compiles the target's desired state at that moment, writes it, reads it back, and fills in
+ * what was written. Not tenant-scoped: the apply job works across tenants.
  *
  * @property int $id
  * @property string|null $tenant_id
@@ -38,6 +39,8 @@ class ConfigRevision extends Model
 {
     public const NUMBER_TARGET_PREFIX = 'number:';
 
+    public const DOMAIN_TARGET_PREFIX = 'domain:';
+
     protected $attributes = [
         'status' => 'draft',
     ];
@@ -54,17 +57,33 @@ class ConfigRevision extends Model
         ];
     }
 
-    public static function numberTarget(string $number): string
+    /**
+     * @param  string  $routingNumber  tenant code and number, e.g. 1042101
+     */
+    public static function numberTarget(string $routingNumber): string
     {
-        return self::NUMBER_TARGET_PREFIX.$number;
+        return self::NUMBER_TARGET_PREFIX.$routingNumber;
+    }
+
+    public static function domainTarget(string $tenantCode): string
+    {
+        return self::DOMAIN_TARGET_PREFIX.$tenantCode;
     }
 
     /**
-     * The number this revision writes, or null for another kind of target.
+     * The number this revision writes, tenant code first, or null for another kind of target.
      */
     public function targetNumber(): ?string
     {
         return str_starts_with($this->target, self::NUMBER_TARGET_PREFIX) ? substr($this->target, strlen(self::NUMBER_TARGET_PREFIX)) : null;
+    }
+
+    /**
+     * The code of the tenant whose SIP domain this revision writes, or null for another target.
+     */
+    public function targetDomainCode(): ?string
+    {
+        return str_starts_with($this->target, self::DOMAIN_TARGET_PREFIX) ? substr($this->target, strlen(self::DOMAIN_TARGET_PREFIX)) : null;
     }
 
     /**

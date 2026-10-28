@@ -127,7 +127,7 @@ class ExtensionController extends Controller
             'sip_credential' => $password === null ? null : [
                 'username' => $extension->extension_number,
                 'password' => $password,
-                ...$extension->node->sipServer(),
+                ...$extension->node->sipServer($extension->tenant),
             ],
         ], fn (mixed $value): bool => $value !== null));
 

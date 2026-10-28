@@ -6,6 +6,7 @@ use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Enums\FailoverType;
 use App\Modules\Telephony\Enums\RingStrategy;
 use App\Modules\Telephony\Models\RingGroup;
+use App\Modules\Telephony\NumberAllocator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -28,7 +29,7 @@ class SaveRingGroupRequest extends FormRequest
         $creating = $this->isMethod('POST');
 
         return [
-            'number' => $creating ? ['required', 'string', 'regex:/^[2-8][0-9]{4}$/'] : ['prohibited'],
+            'number' => $creating ? ['required', 'string', 'regex:'.NumberAllocator::PATTERN] : ['prohibited'],
             'name' => ['required', 'string', 'max:100'],
             'strategy' => ['required', Rule::enum(RingStrategy::class)],
             'ring_seconds' => ['required', 'integer', 'min:'.RingGroup::MIN_RING_SECONDS, 'max:'.RingGroup::MAX_RING_SECONDS],
@@ -47,7 +48,7 @@ class SaveRingGroupRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'number.regex' => 'Use five digits: the tenant\'s prefix and three more.',
+            'number.regex' => NumberAllocator::RULE_MESSAGE,
             'members.max' => 'A ring group has at most '.RingGroup::MAX_MEMBERS.' members.',
             'failover_id.required' => 'Choose where unanswered calls go.',
         ];

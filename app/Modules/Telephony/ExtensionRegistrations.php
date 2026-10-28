@@ -5,6 +5,7 @@ namespace App\Modules\Telephony;
 use App\Modules\Infrastructure\OpenSips\OpenSipsDbAdapter;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Tenancy\Models\Tenant;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -27,13 +28,15 @@ class ExtensionRegistrations
     {
         $states = [];
 
-        foreach ($extensions->groupBy('pbx_node_id') as $nodeId => $onNode) {
-            $node = PbxNode::query()->find($nodeId);
+        foreach ($extensions->groupBy(fn (Extension $extension): string => $extension->pbx_node_id.':'.$extension->tenant_id) as $onNode) {
+            $first = $onNode->first();
+            $node = PbxNode::query()->find($first->pbx_node_id);
+            $domain = Tenant::query()->whereKey($first->tenant_id)->value('sip_domain');
 
             try {
-                $registrations = $node === null ? null : $this->openSips->registrations($node, array_values($onNode->map(fn (Extension $extension): string => $extension->extension_number)->all()));
+                $registrations = $node === null || $domain === null ? null : $this->openSips->registrations($node, $domain, array_values($onNode->map(fn (Extension $extension): string => $extension->extension_number)->all()));
             } catch (Throwable $exception) {
-                Log::warning('Could not read the registrations of a node.', ['pbx_node_id' => $nodeId, 'error' => $exception->getMessage()]);
+                Log::warning('Could not read the registrations of a node.', ['pbx_node_id' => $first->pbx_node_id, 'error' => $exception->getMessage()]);
                 $registrations = null;
             }
 

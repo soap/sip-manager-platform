@@ -30,15 +30,16 @@ it('turns voicemail on with a PIN shown once and writes the mailbox', function (
 
     applyPendingRevisions();
 
-    expect($node->mailboxes['20101'])->toBe(['context' => 't20', 'mailbox' => '20101', 'password' => $pin, 'fullname' => 'Anna'])
-        ->and($node->extens['20101'])->toBe([
-            ['priority' => 1, 'app' => 'GotoIf', 'appdata' => '$["${CALLERID(num):0:2}" != "20"]?denied,1'],
-            ['priority' => 2, 'app' => 'Dial', 'appdata' => 'PJSIP/20101@opensips,30'],
-            ['priority' => 3, 'app' => 'VoiceMail', 'appdata' => '20101@t20,${IF($["${DIALSTATUS}" = "BUSY"]?b:u)}'],
-            ['priority' => 4, 'app' => 'Hangup', 'appdata' => ''],
+    // each tenant has its own voicemail context, t and its code
+    expect($node->mailboxes['20101@t1020'])->toBe(['context' => 't1020', 'mailbox' => '20101', 'password' => $pin, 'fullname' => 'Anna'])
+        ->and($node->extens['102020101'])->toBe([
+            ['priority' => 1, 'app' => 'Dial', 'appdata' => 'PJSIP/102020101@opensips,30'],
+            ['priority' => 2, 'app' => 'VoiceMail', 'appdata' => '20101@t1020,${IF($["${DIALSTATUS}" = "BUSY"]?b:u)}'],
+            ['priority' => 3, 'app' => 'Hangup', 'appdata' => ''],
         ])
-        ->and($node->extens['*97'])->toBe([
-            ['priority' => 1, 'app' => 'VoiceMailMain', 'appdata' => '${CALLERID(num)}@t${CALLERID(num):0:2}'],
+        // *97 of a phone of the tenant reaches Asterisk with the tenant code first
+        ->and($node->extens['1020*97'])->toBe([
+            ['priority' => 1, 'app' => 'VoiceMailMain', 'appdata' => '${CALLERID(num)}@t1020'],
             ['priority' => 2, 'app' => 'Hangup', 'appdata' => ''],
         ]);
 });
@@ -49,21 +50,21 @@ it('resets the PIN and turns voicemail off again', function () {
     $extension = Extension::factory()->on($assignment)->create(['extension_number' => '20101']);
     $this->patch(route('tenant.extensions.voicemail', [$tenant, $extension->id]), ['enabled' => true]);
     applyPendingRevisions();
-    $first = $node->mailboxes['20101']['password'];
+    $first = $node->mailboxes['20101@t1020']['password'];
 
     $this->post(route('tenant.extensions.voicemail-pin', [$tenant, $extension->id]))
         ->assertInertiaFlash('voicemailPin.extension_number', '20101');
     applyPendingRevisions();
 
-    expect($node->mailboxes['20101']['password'])->not->toBe($first)
-        ->and($node->mailboxes['20101']['password'])->toBe($extension->fresh()->voicemail_pin);
+    expect($node->mailboxes['20101@t1020']['password'])->not->toBe($first)
+        ->and($node->mailboxes['20101@t1020']['password'])->toBe($extension->fresh()->voicemail_pin);
 
     $this->patch(route('tenant.extensions.voicemail', [$tenant, $extension->id]), ['enabled' => false])
         ->assertSessionHasNoErrors();
     applyPendingRevisions();
 
     expect($node->mailboxes)->toBe([])
-        ->and(array_column($node->extens['20101'], 'app'))->toBe(['GotoIf', 'Dial', 'Hangup'])
+        ->and(array_column($node->extens['102020101'], 'app'))->toBe(['Dial', 'Hangup'])
         ->and($extension->fresh()->voicemail_pin)->toBeNull();
 });
 
@@ -82,7 +83,7 @@ it('removes the mailbox of a disabled or deleted extension', function () {
 
 it('refuses voicemail on a node without it', function () {
     fakeNode();
-    $assignment = TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment = TenantPbxAssignment::factory()->code('1020')->create();
     $assignment->node->update(['services' => [...$assignment->node->services, 'asterisk' => [...$assignment->node->services['asterisk'], 'features' => ['realtime']]]]);
     [$tenant] = provisioningTenant($assignment);
     $extension = Extension::factory()->on($assignment)->create();
@@ -111,9 +112,9 @@ it('leaves a message in a mailbox when nobody in a ring group answers', function
     ])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
-    expect(array_slice($node->extens['20500'], 2))->toBe([
-        ['priority' => 3, 'app' => 'VoiceMail', 'appdata' => '20101@t20,u'],
-        ['priority' => 4, 'app' => 'Hangup', 'appdata' => ''],
+    expect(array_slice($node->extens['102020500'], 1))->toBe([
+        ['priority' => 2, 'app' => 'VoiceMail', 'appdata' => '20101@t1020,u'],
+        ['priority' => 3, 'app' => 'Hangup', 'appdata' => ''],
     ]);
 
     // turning the mailbox off rewrites the group, which then hangs up
@@ -121,7 +122,7 @@ it('leaves a message in a mailbox when nobody in a ring group answers', function
     applyPendingRevisions();
 
     expect(ProvisioningOperation::query()->where('aggregate_type', RingGroup::MORPH)->where('type', OperationType::DependencyChanged)->exists())->toBeTrue()
-        ->and(array_column($node->extens['20500'], 'app'))->toBe(['GotoIf', 'Dial', 'Hangup']);
+        ->and(array_column($node->extens['102020500'], 'app'))->toBe(['Dial', 'Hangup']);
 
     $this->delete(route('tenant.extensions.destroy', [$tenant, $extension->id]));
 

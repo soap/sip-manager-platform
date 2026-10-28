@@ -13,14 +13,14 @@ use App\Modules\Tenancy\Models\Tenant;
 use App\Modules\Tenancy\Models\TenantMembership;
 
 /**
- * A member of a tenant with prefix 20 and an API token issued in it.
+ * A member of a tenant on a node and an API token issued in it.
  *
  * @param  list<string>  $abilities
  * @return array{token: string, user: User, assignment: TenantPbxAssignment, tenant: Tenant}
  */
 function apiClient(TenantRole $role = TenantRole::Admin, array $abilities = ['read', 'write'], ?TenantPbxAssignment $assignment = null): array
 {
-    $assignment ??= TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment ??= TenantPbxAssignment::factory()->create();
     $user = User::factory()->create();
     TenantMembership::withoutTenantScope()->create(['tenant_id' => $assignment->tenant_id, 'user_id' => $user->id, 'role' => $role]);
 
@@ -43,7 +43,8 @@ it('creates an extension, answers 202 with the SIP account once and records the 
         ->assertJsonPath('data.extension_number', '20101')
         ->assertJsonPath('data.provisioning.status', 'pending')
         ->assertJsonPath('sip_credential.username', '20101')
-        ->assertJsonPath('sip_credential.domain', $client['assignment']->node->sip_domain);
+        ->assertJsonPath('sip_credential.domain', $client['assignment']->tenant->sip_domain)
+        ->assertJsonPath('sip_credential.proxy', $client['assignment']->node->sip_domain);
 
     $extension = Extension::withoutTenantScope()->sole();
     expect($response->json('sip_credential.password'))->toBe(SipCredential::withoutTenantScope()->sole()->secret)
@@ -89,7 +90,7 @@ it('forgets the key of a refused request so the client can fix it and try again'
     $client = apiClient();
 
     $this->withToken($client['token'])->withHeader('Idempotency-Key', 'k1')
-        ->postJson('/api/v1/extensions', ['extension_number' => '21101', 'display_name' => 'Reception'])
+        ->postJson('/api/v1/extensions', ['extension_number' => '0812', 'display_name' => 'Reception'])
         ->assertUnprocessable();
 
     expect(IdempotencyKey::query()->count())->toBe(0);
@@ -97,7 +98,7 @@ it('forgets the key of a refused request so the client can fix it and try again'
 
 it('keeps each token in its own tenant', function () {
     $mine = apiClient();
-    $other = TenantPbxAssignment::factory()->prefix('21')->create(['pbx_node_id' => $mine['assignment']->pbx_node_id]);
+    $other = TenantPbxAssignment::factory()->code('1021')->create(['pbx_node_id' => $mine['assignment']->pbx_node_id]);
     $theirs = Extension::factory()->on($other)->create(['extension_number' => '21101']);
     $theirOperation = apiClient(assignment: $other);
     $operation = $this->withToken($theirOperation['token'])->deleteJson("/api/v1/extensions/{$theirs->id}")->json('operation_id');
@@ -151,8 +152,10 @@ it('describes the tenant, the role and where phones register', function () {
         ->assertOk()
         ->assertJsonPath('data.role', 'owner')
         ->assertJsonPath('data.token_abilities', ['read'])
-        ->assertJsonPath('data.pbx.prefix', '20')
-        ->assertJsonPath('data.pbx.sip_server.domain', $client['assignment']->node->sip_domain);
+        ->assertJsonPath('data.code', $client['assignment']->tenant->code)
+        ->assertJsonPath('data.sip_domain', $client['assignment']->tenant->sip_domain)
+        ->assertJsonPath('data.pbx.sip_server.domain', $client['assignment']->tenant->sip_domain)
+        ->assertJsonPath('data.pbx.sip_server.proxy', $client['assignment']->node->sip_domain);
 });
 
 it('changes an extension only against the version the client saw', function () {

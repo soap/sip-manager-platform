@@ -49,7 +49,9 @@ type Extension = {
 };
 
 type SipServer = {
-    domain: string | null;
+    domain: string;
+    /** The node, for phones whose domain is not in DNS yet. */
+    proxy: string | null;
     port: number;
     transports: string[];
 };
@@ -63,8 +65,7 @@ type SipCredential = SipServer & {
 const props = defineProps<{
     assignment: {
         node: string;
-        prefix: string;
-        numbers: string;
+        code: string;
         status: 'active' | 'suspended';
         voicemail: boolean;
         server: SipServer;
@@ -276,8 +277,8 @@ function remove(extension: Extension): void {
         <Alert v-if="!assignment">
             <AlertTitle>No PBX node yet</AlertTitle>
             <AlertDescription>
-                A platform admin places this tenant on a node and gives it a
-                prefix before extensions can be created.
+                A platform admin places this tenant on a node before extensions
+                can be created.
             </AlertDescription>
         </Alert>
 
@@ -292,7 +293,7 @@ function remove(extension: Extension): void {
                 }}</span></span
             >
             <span
-                >SIP server
+                >SIP domain
                 <span class="font-mono text-foreground"
                     >{{ assignment.server.domain }}:{{
                         assignment.server.port
@@ -300,9 +301,9 @@ function remove(extension: Extension): void {
                 ></span
             >
             <span
-                >Numbers
+                >Tenant code
                 <span class="font-mono text-foreground">{{
-                    assignment.numbers
+                    assignment.code
                 }}</span></span
             >
             <Badge
@@ -330,6 +331,12 @@ function remove(extension: Extension): void {
                         SIP server / domain (realm)
                     </dt>
                     <dd class="font-mono">{{ revealed.domain }}</dd>
+                    <template v-if="revealed.proxy">
+                        <dt class="text-muted-foreground">
+                            Outbound proxy (if the domain is not in DNS)
+                        </dt>
+                        <dd class="font-mono">{{ revealed.proxy }}</dd>
+                    </template>
                     <dt class="text-muted-foreground">Port / transport</dt>
                     <dd class="font-mono">
                         {{ revealed.port }} ·
@@ -392,8 +399,8 @@ function remove(extension: Extension): void {
             <CardHeader>
                 <CardTitle>New extension</CardTitle>
                 <CardDescription>
-                    Five digits: prefix {{ assignment.prefix }} and three more.
-                    The number cannot change later; phones register with it.
+                    2 to 5 digits, not starting with 0, 8 or 9 (and no 1xx). The
+                    number cannot change later; phones register with it.
                 </CardDescription>
             </CardHeader>
             <CardContent>
@@ -417,7 +424,7 @@ function remove(extension: Extension): void {
                             maxlength="5"
                             required
                             :default-value="nextNumber ?? ''"
-                            :placeholder="`${assignment.prefix}001`"
+                            placeholder="201"
                         />
                         <InputError :message="formErrors.extension_number" />
                     </div>

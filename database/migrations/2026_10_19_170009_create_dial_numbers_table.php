@@ -19,9 +19,9 @@ return new class extends Migration
             $table->unsignedBigInteger('owner_id');
             $table->timestamps();
 
-            $table->unique(['pbx_node_id', 'number']);
+            $table->unique(['tenant_id', 'number']);
             $table->unique(['owner_type', 'owner_id']);
-            $table->index(['tenant_id', 'number']);
+            $table->index('pbx_node_id');
         });
     }
 

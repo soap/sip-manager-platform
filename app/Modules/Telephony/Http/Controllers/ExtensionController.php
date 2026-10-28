@@ -29,18 +29,17 @@ class ExtensionController extends Controller
         LatestOperations $latest,
         ExtensionRegistrations $registrations,
     ): Response {
-        $assignment = $tenant->pbxAssignment()->with(['node', 'numberRange'])->first();
+        $assignment = $tenant->pbxAssignment()->with(['node'])->first();
         $list = Extension::query()->orderBy('extension_number')->get();
         $operations = $latest->of($tenant->id, Extension::MORPH, $list->modelKeys());
 
         return Inertia::render('tenants/extensions/Index', [
-            'assignment' => $assignment?->numberRange === null ? null : [
+            'assignment' => $assignment === null ? null : [
                 'node' => $assignment->node->name,
-                'prefix' => $assignment->numberRange->prefix,
-                'numbers' => $assignment->numberRange->label(),
+                'code' => $tenant->code,
                 'status' => $assignment->status->value,
                 'voicemail' => $assignment->node->hasVoicemail(),
-                'server' => $assignment->node->sipServer(),
+                'server' => $assignment->node->sipServer($tenant),
             ],
             'extensions' => $list->map(fn (Extension $extension): array => [
                 'id' => $extension->id,
@@ -159,7 +158,7 @@ class ExtensionController extends Controller
             'extension_number' => $extension->extension_number,
             'username' => $extension->extension_number,
             'password' => $password,
-            ...$extension->node->sipServer(),
+            ...$extension->node->sipServer($extension->tenant),
         ]);
     }
 

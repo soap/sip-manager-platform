@@ -55,17 +55,18 @@ class RealtimeAdapter
     }
 
     /**
-     * Makes the mailbox's voicemail row exactly the given one, or removes it for null; app_voicemail
-     * reads the table on every lookup. Recorded messages stay on disk either way.
+     * Makes the voicemail row of mailbox@context exactly the given one, or removes it for null;
+     * app_voicemail reads the table on every lookup. Each tenant has its own context, so the same
+     * mailbox in other contexts belongs to other tenants. Recorded messages stay on disk either way.
      *
      * @param  array{context: string, mailbox: string, password: string, fullname: string}|null  $box
      */
-    public function replaceMailbox(PbxNode $node, string $mailbox, ?array $box): void
+    public function replaceMailbox(PbxNode $node, string $context, string $mailbox, ?array $box): void
     {
         $database = $this->connections->asteriskDatabase($node);
 
-        $database->transaction(function () use ($database, $mailbox, $box): void {
-            $database->table('voicemail')->where('mailbox', $mailbox)->delete();
+        $database->transaction(function () use ($database, $context, $mailbox, $box): void {
+            $database->table('voicemail')->where('context', $context)->where('mailbox', $mailbox)->delete();
 
             if ($box !== null) {
                 $database->table('voicemail')->insert($box);
@@ -76,10 +77,11 @@ class RealtimeAdapter
     /**
      * @return array{context: string, mailbox: string, password: string, fullname: string}|null
      */
-    public function mailbox(PbxNode $node, string $mailbox): ?array
+    public function mailbox(PbxNode $node, string $context, string $mailbox): ?array
     {
         $row = $this->connections->asteriskDatabase($node)
             ->table('voicemail')
+            ->where('context', $context)
             ->where('mailbox', $mailbox)
             ->first(['context', 'mailbox', 'password', 'fullname']);
 

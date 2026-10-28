@@ -7,25 +7,26 @@ use App\Modules\Nodes\NodeConnections;
 use Carbon\CarbonImmutable;
 
 /**
- * Rows of the OpenSIPS database on a node that this application owns: one subscriber per SIP
- * username. OpenSIPS reads subscriber on every authentication (auth_db), so a write needs no reload.
+ * Rows of the OpenSIPS database on a node that this application owns: a subscriber per SIP
+ * account (username in a tenant's SIP domain) and a domain row per tenant (plan D6). OpenSIPS reads
+ * both on every request (auth_db; domain with db_mode 0), so a write needs no reload.
  */
 class OpenSipsDbAdapter
 {
     public function __construct(private NodeConnections $connections) {}
 
     /**
-     * Makes the username's subscriber exactly the given row, or removes it for null. Rows of the
-     * username under another domain are removed too, so a new SIP domain leaves nothing behind.
+     * Makes the subscriber of username@domain exactly the given row, or removes it for null. The
+     * same username in other domains belongs to other tenants and stays.
      *
      * @param  array{username: string, domain: string, ha1: string, ha1_sha256: string}|null  $subscriber
      */
-    public function replaceSubscriber(PbxNode $node, string $username, ?array $subscriber): void
+    public function replaceSubscriber(PbxNode $node, string $username, string $domain, ?array $subscriber): void
     {
         $database = $this->connections->openSipsDatabase($node);
 
-        $database->transaction(function () use ($database, $username, $subscriber): void {
-            $database->table('subscriber')->where('username', $username)->delete();
+        $database->transaction(function () use ($database, $username, $domain, $subscriber): void {
+            $database->table('subscriber')->where('username', $username)->where('domain', $domain)->delete();
 
             if ($subscriber !== null) {
                 $database->table('subscriber')->insert($subscriber);
@@ -34,15 +35,47 @@ class OpenSipsDbAdapter
     }
 
     /**
-     * The registrations of the usernames that have not expired, newest first, from the location
-     * table. OpenSIPS writes it back from memory periodically (sql-write-back), so a fresh
-     * registration may take up to a minute to appear; a phone switched off without unregistering
-     * stays until its registration expires.
+     * Makes the tenant's domain row exactly the given one, or removes it for null. The row's attrs
+     * is the tenant code, which OpenSIPS puts before the numbers it hands to Asterisk.
+     *
+     * @param  array{domain: string, attrs: string}|null  $row
+     */
+    public function replaceDomain(PbxNode $node, string $tenantCode, ?array $row): void
+    {
+        $database = $this->connections->openSipsDatabase($node);
+
+        $database->transaction(function () use ($database, $tenantCode, $row): void {
+            $database->table('domain')
+                ->where('attrs', $tenantCode)
+                ->when($row !== null, fn ($query) => $query->orWhere('domain', $row['domain']))
+                ->delete();
+
+            if ($row !== null) {
+                $database->table('domain')->insert($row);
+            }
+        });
+    }
+
+    /**
+     * @return array{domain: string, attrs: string}|null
+     */
+    public function domain(PbxNode $node, string $tenantCode): ?array
+    {
+        $row = $this->connections->openSipsDatabase($node)->table('domain')->where('attrs', $tenantCode)->first(['domain', 'attrs']);
+
+        return $row === null ? null : ['domain' => trim((string) $row->domain), 'attrs' => trim((string) $row->attrs)];
+    }
+
+    /**
+     * The registrations of the usernames in the domain that have not expired, newest first, from
+     * the location table. OpenSIPS writes it back from memory periodically (sql-write-back), so a
+     * fresh registration may take up to a minute to appear; a phone switched off without
+     * unregistering stays until its registration expires.
      *
      * @param  list<string>  $usernames
      * @return array<string, list<array{address: string, user_agent: string, registered_at: CarbonImmutable|null, expires_at: CarbonImmutable|null}>>
      */
-    public function registrations(PbxNode $node, array $usernames): array
+    public function registrations(PbxNode $node, string $domain, array $usernames): array
     {
         if ($usernames === []) {
             return [];
@@ -52,6 +85,7 @@ class OpenSipsDbAdapter
 
         $rows = $this->connections->openSipsDatabase($node)
             ->table('location')
+            ->where('domain', $domain)
             ->whereIn('username', $usernames)
             // the node's clock decides, so a skewed local clock cannot hide or revive a phone
             ->where(fn ($query) => $query->where('expires', 0)->orWhereRaw('expires > unix_timestamp()'))
@@ -84,13 +118,13 @@ class OpenSipsDbAdapter
     /**
      * @return list<array{username: string, domain: string, ha1: string, ha1_sha256: string}>
      */
-    public function subscribers(PbxNode $node, string $username): array
+    public function subscribers(PbxNode $node, string $username, string $domain): array
     {
         /** @var list<array{username: string, domain: string, ha1: string, ha1_sha256: string}> */
         return $this->connections->openSipsDatabase($node)
             ->table('subscriber')
             ->where('username', $username)
-            ->orderBy('domain')
+            ->where('domain', $domain)
             ->get(['username', 'domain', 'ha1', 'ha1_sha256'])
             ->map(fn (object $row): array => array_map(fn (mixed $value): string => trim((string) $value), (array) $row))
             ->all();

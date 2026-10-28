@@ -24,9 +24,13 @@ class TenantFactory extends Factory
     {
         $name = fake()->unique()->company();
 
+        $slug = Str::slug($name).'-'.fake()->unique()->numberBetween(1, 99999);
+
         return [
             'name' => $name,
-            'slug' => Str::slug($name).'-'.fake()->unique()->numberBetween(1, 99999),
+            'slug' => $slug,
+            'code' => (string) fake()->unique()->numberBetween(Tenant::FIRST_CODE, Tenant::LAST_CODE),
+            'sip_domain' => "{$slug}.sip.example.com",
             'status' => TenantStatus::Active,
         ];
     }

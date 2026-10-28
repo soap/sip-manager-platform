@@ -20,20 +20,16 @@ class AssignmentController extends Controller
     {
         $tenant = Tenant::query()->findOrFail($request->string('tenant_id')->toString());
 
-        $assignment = $assignments->assign($tenant, $node, $request->string('prefix')->toString());
+        $assignments->assign($tenant, $node);
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => "{$tenant->name} is on {$node->name} with numbers {$assignment->numberRange?->label()}."]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => "{$tenant->name} is on {$node->name} with SIP domain {$tenant->sip_domain}."]);
 
         return back();
     }
 
     public function update(UpdateAssignmentRequest $request, TenantPbxAssignment $assignment, ManageAssignments $assignments): RedirectResponse
     {
-        $assignments->update(
-            $assignment,
-            $request->string('prefix')->toString(),
-            $request->enum('status', AssignmentStatus::class) ?? AssignmentStatus::Active,
-        );
+        $assignments->update($assignment, $request->enum('status', AssignmentStatus::class) ?? AssignmentStatus::Active);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => "Assignment of {$assignment->tenant->name} updated."]);
 

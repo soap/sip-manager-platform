@@ -10,21 +10,21 @@ use App\Modules\Tenancy\Models\TenantMembership;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /**
- * A tenant on a node with prefix 20 (or the assignment given), and the signed-in user in the role.
+ * A tenant with code 1020 on a node (or the assignment given), and the signed-in user in the role.
  *
  * @return array{Tenant, TenantPbxAssignment}
  */
 function tenantOnNode(TenantRole $role = TenantRole::Admin, ?TenantPbxAssignment $assignment = null): array
 {
     $user = signIn();
-    $assignment ??= TenantPbxAssignment::factory()->prefix('20')->create();
+    $assignment ??= TenantPbxAssignment::factory()->code('1020')->create();
     $tenant = $assignment->tenant;
     TenantMembership::withoutTenantScope()->create(['tenant_id' => $tenant->id, 'user_id' => $user->id, 'role' => $role]);
 
     return [$tenant, $assignment];
 }
 
-it('creates an extension with the tenant prefix on its node', function () {
+it('creates an extension of the tenant on its node', function () {
     [$tenant, $assignment] = tenantOnNode();
 
     $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'Reception'])
@@ -43,29 +43,41 @@ it('creates an extension with the tenant prefix on its node', function () {
         ->and($entry->summary)->toBe(['number' => '20101', 'display_name' => 'Reception']);
 });
 
-it('refuses a number without the tenant prefix or of the wrong length', function (string $number, string $message) {
+it('takes numbers of 2 to 5 digits that cannot be confused with outbound, other tenants or emergency numbers', function (string $number, bool $accepted) {
     [$tenant] = tenantOnNode();
 
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => $number, 'display_name' => 'X'])
-        ->assertSessionHasErrors(['extension_number' => $message]);
+    $response = $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => $number, 'display_name' => 'X']);
+
+    $accepted
+        ? $response->assertSessionHasNoErrors()
+        : $response->assertSessionHasErrors(['extension_number' => 'Use 2 to 5 digits, not starting with 0, 8 or 9, and not a three-digit number starting with 1.']);
 })->with([
-    'another prefix' => ['21001', 'Use a number from 20000–20999.'],
-    'three digits' => ['101', 'Use five digits: the tenant\'s prefix and three more.'],
-    'six digits' => ['201010', 'Use five digits: the tenant\'s prefix and three more.'],
-    'emergency range' => ['19100', 'Use five digits: the tenant\'s prefix and three more.'],
-    'not digits' => ['2010a', 'Use five digits: the tenant\'s prefix and three more.'],
+    'two digits' => ['20', true],
+    'three digits' => ['201', true],
+    'four digits from 1' => ['1001', true],
+    'five digits' => ['20101', true],
+    'one digit' => ['2', false],
+    'six digits' => ['201010', false],
+    'outbound' => ['0812', false],
+    'other tenants' => ['81042', false],
+    'outbound prefix' => ['9001', false],
+    'emergency 191' => ['191', false],
+    'three digits from 1' => ['101', false],
+    'emergency 1669' => ['1669', false],
+    'not digits' => ['2010a', false],
+    'feature code' => ['*97', false],
 ]);
 
-it('keeps two tenants on one node apart by prefix', function () {
-    $first = TenantPbxAssignment::factory()->prefix('20')->create();
-    $second = TenantPbxAssignment::factory()->prefix('21')->create(['pbx_node_id' => $first->pbx_node_id]);
-    Extension::factory()->on($first)->create(['extension_number' => '20101']);
+it('lets every tenant on a node have the same numbers', function () {
+    $first = TenantPbxAssignment::factory()->code('1020')->create();
+    $second = TenantPbxAssignment::factory()->code('1021')->create(['pbx_node_id' => $first->pbx_node_id]);
+    Extension::factory()->on($first)->create(['extension_number' => '201']);
     [$tenant] = tenantOnNode(assignment: $second);
 
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'X'])
-        ->assertSessionHasErrors(['extension_number' => 'Use a number from 21000–21999.']);
-    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '21101', 'display_name' => 'X'])
+    $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'X'])
         ->assertSessionHasNoErrors();
+
+    expect(Extension::withoutTenantScope()->where('extension_number', '201')->count())->toBe(2);
 });
 
 it('refuses a number the tenant already uses', function () {
@@ -83,26 +95,27 @@ it('needs a node and active numbers', function () {
     $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '20101', 'display_name' => 'X'])
         ->assertSessionHasErrors(['extension_number' => 'This tenant has no PBX node yet. A platform admin assigns one.']);
 
-    [$suspended] = tenantOnNode(assignment: TenantPbxAssignment::factory()->prefix('20')->suspended()->create());
+    [$suspended] = tenantOnNode(assignment: TenantPbxAssignment::factory()->code('1020')->suspended()->create());
 
     $this->post(route('tenant.extensions.store', $suspended), ['extension_number' => '20101', 'display_name' => 'X'])
         ->assertSessionHasErrors(['extension_number' => 'This tenant\'s numbers are suspended.']);
 });
 
-it('lists the extensions with the prefix and the next free number', function () {
+it('lists the extensions with the tenant code, its SIP domain and the next free number', function () {
     [$tenant, $assignment] = tenantOnNode(TenantRole::Member);
-    Extension::factory()->on($assignment)->create(['extension_number' => '20001']);
-    Extension::factory()->on($assignment)->create(['extension_number' => '20003']);
-    Extension::factory()->on(TenantPbxAssignment::factory()->create())->create();
+    Extension::factory()->on($assignment)->create(['extension_number' => '201']);
+    Extension::factory()->on($assignment)->create(['extension_number' => '203']);
+    Extension::factory()->on(TenantPbxAssignment::factory()->create())->create(['extension_number' => '202']);
 
     $this->get(route('tenant.extensions.index', $tenant))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('tenants/extensions/Index')
             ->has('extensions', 2)
-            ->where('extensions.0.extension_number', '20001')
-            ->where('assignment.prefix', '20')
-            ->where('assignment.numbers', '20000–20999')
-            ->where('nextNumber', '20002')
+            ->where('extensions.0.extension_number', '201')
+            ->where('assignment.code', '1020')
+            ->where('assignment.server.domain', $tenant->sip_domain)
+            ->where('assignment.server.proxy', $assignment->node->sip_domain)
+            ->where('nextNumber', '202')
             ->where('canManage', false));
 });
 
