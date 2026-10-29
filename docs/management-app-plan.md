@@ -475,8 +475,8 @@ API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/
 
 หน้าจอ (Inertia/Vue) — ✅ = มีแล้ว:
 
-- **Platform admin**: ✅ Nodes (`/admin/nodes`: sync, สถานะ endpoint, ทดสอบการเชื่อมต่อ, assign tenant), ✅ Tenants (`/admin/tenants`); ⏳ Operations (ทั้งระบบ, retry), Drift report
-- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens; ⏳ Devices, Call history (CDR), Operations
+- **Platform admin**: ✅ Nodes (`/admin/nodes`: sync, สถานะ endpoint, ทดสอบการเชื่อมต่อ, assign tenant), ✅ Tenants (`/admin/tenants`), ✅ Operations (`/admin/operations`: ทั้งระบบ, retry); ⏳ Drift report
+- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens, Operations (`/t/{slug}/operations`); ⏳ Devices, Call history (CDR)
 
 ---
 
@@ -681,4 +681,4 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 
 ### ถัดไป
 
-หน้า Operations → M6 (reconciler + drift report) → M7 (CDR sync ก่อน AMI listener)
+✅ หน้า Operations (tenant + admin: กรอง all/in progress/failed, retry = revision ใหม่ของ target เดิม ได้เฉพาะ revision ล่าสุดของ target ที่ failed, audit `operation.retried`) → M6 (reconciler + drift report) → M7 (CDR sync ก่อน AMI listener)

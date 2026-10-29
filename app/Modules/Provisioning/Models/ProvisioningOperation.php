@@ -4,6 +4,7 @@ namespace App\Modules\Provisioning\Models;
 
 use App\Modules\Provisioning\Enums\OperationStatus;
 use App\Modules\Provisioning\Enums\OperationType;
+use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
@@ -60,5 +61,13 @@ class ProvisioningOperation extends Model
     public function revision(): BelongsTo
     {
         return $this->belongsTo(ConfigRevision::class, 'config_revision_id');
+    }
+
+    /**
+     * @return BelongsTo<Tenant, $this>
+     */
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
     }
 }

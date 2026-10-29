@@ -23,10 +23,28 @@ class ProvisioningHealth
      */
     public function stalledFor(string $tenantId): ?array
     {
+        return $this->stalled($tenantId);
+    }
+
+    /**
+     * stalledFor() over every tenant, for the platform admin.
+     *
+     * @return array{reason: 'relay'|'worker', since: string}|null
+     */
+    public function stalledAnywhere(): ?array
+    {
+        return $this->stalled(null);
+    }
+
+    /**
+     * @return array{reason: 'relay'|'worker', since: string}|null
+     */
+    private function stalled(?string $tenantId): ?array
+    {
         $cutoff = now()->subSeconds(self::STALL_SECONDS);
 
         $oldestWaiting = ProvisioningOperation::query()
-            ->where('tenant_id', $tenantId)
+            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
             ->where('status', OperationStatus::Pending)
             ->where('created_at', '<=', $cutoff)
             ->oldest()

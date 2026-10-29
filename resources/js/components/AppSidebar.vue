@@ -7,6 +7,7 @@ import {
     PhoneForwarded,
     PhoneOutgoing,
     LayoutGrid,
+    ListChecks,
     ScrollText,
     Server,
     ShieldCheck,
@@ -27,6 +28,7 @@ import {
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { index as adminNodes } from '@/routes/admin/nodes';
+import { index as adminOperations } from '@/routes/admin/operations';
 import { index as adminTenants } from '@/routes/admin/tenants';
 import { dashboard as tenantDashboard } from '@/routes/tenant';
 import { index as apiTokens } from '@/routes/tenant/api-tokens';
@@ -35,6 +37,7 @@ import { index as calling } from '@/routes/tenant/calling';
 import { index as extensions } from '@/routes/tenant/extensions';
 import { index as ringGroups } from '@/routes/tenant/ring-groups';
 import { index as members } from '@/routes/tenant/members';
+import { index as operations } from '@/routes/tenant/operations';
 import type { NavItem } from '@/types';
 
 const page = usePage();
@@ -49,6 +52,11 @@ const mainNavItems = computed<NavItem[]>(() => [
         ? [
               { title: 'All tenants', href: adminTenants(), icon: ShieldCheck },
               { title: 'SIP nodes', href: adminNodes(), icon: Server },
+              {
+                  title: 'Operations',
+                  href: adminOperations(),
+                  icon: ListChecks,
+              },
           ]
         : []),
 ]);
@@ -85,6 +93,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
             title: 'Calling permissions',
             href: calling({ tenant: tenant.slug }),
             icon: PhoneOutgoing,
+        },
+        {
+            title: 'Operations',
+            href: operations({ tenant: tenant.slug }),
+            icon: ListChecks,
         },
         ...(tenant.canManageMembers
             ? [

@@ -58,6 +58,17 @@ class RequestProvisioning
         return $this->request($nodeId, $tenantId, ConfigRevision::callingTarget($this->tenantCode($tenantId)), $type, $aggregateType, $aggregateId, $idempotencyKey);
     }
 
+    /**
+     * The same target on the same node once more, e.g. after the revision failed. The apply job
+     * compiles the target as it is then, so the new revision carries every change made since.
+     *
+     * @throws LogicException when called outside a database transaction
+     */
+    public function again(ConfigRevision $revision, OperationType $type): ProvisioningOperation
+    {
+        return $this->request($revision->pbx_node_id, (string) $revision->tenant_id, $revision->target, $type, $revision->aggregate_type, $revision->aggregate_id);
+    }
+
     private function tenantCode(string $tenantId): string
     {
         return (string) Tenant::query()->whereKey($tenantId)->value('code');
