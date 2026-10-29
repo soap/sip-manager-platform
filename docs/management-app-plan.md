@@ -282,39 +282,47 @@ Long-running processes: `horizon`, `scheduler`, `ami:listen {node}` (หนึ�
 
 ## 4. โมดูลและ Data Model (PostgreSQL)
 
+ตามโค้ด ณ 29 ต.ค. 2026 (หลัง D6/D7) — แถวที่มี _(แผน)_ ยังไม่มีตาราง
+
 ```
 app/Modules/
-  Tenancy/        Tenant, TenantMembership, TenantContext middleware, policies
-  Telephony/      Extension, Device, SipCredential, (Phase 4: SipTrunk, DidNumber, routes, RingGroup)
-  Provisioning/   ConfigRevision, ProvisioningOperation, OutboxMessage, Compiler/*, Reconciler
-  Nodes/          PbxNode, TenantPbxAssignment, SipDeployerClient, NodeSecret
-  CallRecords/    CallRecord, CallEvent, CdrSync
-  Audit/          AuditLog, Auditable trait, redaction
-  Infrastructure/ OpenSips/OpenSipsDbAdapter, Asterisk/RealtimeAdapter, Asterisk/Ami/*, Asterisk/Ari/*
-  Shared/         Enums, ValueObjects (E164, ExtensionNumber), Idempotency
+  Tenancy/        Tenant, TenantMembership, ApiToken, TenantContext + BelongsToTenant, SetTenantContext / SetApiTenant, policies
+  Telephony/      Extension, DialNumber, SipCredential, RingGroup, CallingProfile, AuthorizationCode, NumberAllocator, ExtensionRegistrations
+  Provisioning/   ConfigRevision, ProvisioningOperation, OutboxMessage, Compiler/ (NumberCompiler, CallingCompiler), ApplyRevision, ProvisioningHealth
+  Nodes/          PbxNode, NodeSecret, TenantPbxAssignment, SipDeployer (client), NodeConnections, CheckNodeConnections
+  Infrastructure/ OpenSips/OpenSipsDbAdapter, Asterisk/RealtimeAdapter, Asterisk/AmiClient + AmiAdapter
+  Audit/          AuditLog, Audit::record() + redaction
+  (แผน) CallRecords/  CallRecord, CallEvent, CdrSync — Phase 3
 ```
 
-| ตาราง                         | คอลัมน์หลัก                                                                                                                                                                                                                                                                             |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tenants`                     | id (ulid), name, slug, status, settings jsonb                                                                                                                                                                                                                                           |
-| `tenant_number_ranges`        | tenant_id, pbx_node_id, prefix (`20`–`89`), unique (pbx_node_id, prefix); MVP 1 range ต่อ tenant                                                                                                                                                                                        |
-| `tenant_memberships`          | tenant_id, user_id, role (`owner/admin/member`); unique (tenant_id, user_id)                                                                                                                                                                                                            |
-| `pbx_nodes`                   | id, deployer_server_id (unique), name, hostname, sip_domain, private_address, public_address, environment (`lab/pilot/production`), status, services jsonb (release/version), capabilities jsonb (feature groups), endpoints jsonb (db/ami/ari host:port), manifest_checksum, synced_at |
-| `node_secrets`                | pbx_node_id, kind (`opensips_db/asterisk_db/ami/ari`), username, secret (encrypted), fetched_at, rotated_at                                                                                                                                                                             |
-| `tenant_pbx_assignments`      | tenant_id, pbx_node_id, role=`primary`, status; MVP: unique(tenant_id) (หนึ่ง primary node ต่อ tenant; หลาย tenant ต่อ node ได้)                                                                                                                                                        |
-| `extensions`                  | tenant_id, number (5 หลัก ต้องขึ้นต้นด้วย prefix ของ tenant), display_name, status, voicemail_enabled, outbound_policy, `version` (optimistic lock); unique (tenant_id, number)                                                                                                         |
-| `devices`                     | tenant_id, extension_id, vendor/model, mac (nullable), provisioning_profile, status                                                                                                                                                                                                     |
-| `sip_credentials`             | tenant_id, extension_id, sip_username, realm, ha1, secret_encrypted (ตาม D4), rotated_at; unique (pbx_node_id, sip_username)                                                                                                                                                            |
-| `config_revisions`            | tenant_id, pbx_node_id, revision_number, aggregate_type/id, checksum, compiled jsonb (rows ที่จะเขียน, ไม่มี secret), status (`draft/validated/applying/applied/failed/superseded`), validation_report, apply_result                                                                    |
-| `provisioning_operations`     | id (ulid = operation_id), tenant_id, type, aggregate, idempotency_key (unique ต่อ tenant), config_revision_id, status (`pending/running/applied/retrying/failed`), attempts, error_code, error_message, next_attempt_at                                                                 |
-| `outbox_messages`             | id, topic, payload jsonb, available_at, dispatched_at                                                                                                                                                                                                                                   |
-| `idempotency_keys`            | tenant_id, key, request_hash, response jsonb, expires_at                                                                                                                                                                                                                                |
-| `call_records` (P3)           | tenant_id, pbx_node_id, uniqueid, linkedid, sequence, direction, src, dst, start/answer/end, duration, billsec, disposition, raw jsonb; unique (pbx_node_id, uniqueid, sequence)                                                                                                        |
-| `call_events` (P3)            | pbx_node_id, linkedid, uniqueid, event, payload jsonb (redacted), occurred_at, dedupe_hash unique                                                                                                                                                                                       |
-| `registration_snapshots` (P3) | pbx_node_id, sip_username, contact, user_agent, received, expires_at, seen_at                                                                                                                                                                                                           |
-| `audit_logs`                  | tenant_id, actor_id, action, resource type/id, summary jsonb (redacted), reason, ip, created_at                                                                                                                                                                                         |
+| ตาราง                                | คอลัมน์หลัก                                                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tenants`                            | id (ulid), name, slug (unique), `code` 4 หลัก (unique, 1000–9999), `sip_domain` (unique), status, `cross_tenant_inbound` (`none/all/selected`), `auth_salt`, settings json                                                          |
+| `tenant_memberships`                 | tenant_id, user_id, role (`owner/admin/member`); unique (tenant_id, user_id)                                                                                                                                                        |
+| `tenant_inbound_allowlist`           | tenant_id, source_tenant_id — ใช้เมื่อ `cross_tenant_inbound = selected`                                                                                                                                                            |
+| `pbx_nodes`                          | deployer_server_id (unique), manifest_version, name, hostname, sip_domain, environment, status, region, addresses/services/endpoints/dialplan json, credentials_version, connection_checks, checked_at, synced_at, removed_at       |
+| `node_secrets`                       | pbx_node_id, kind (`opensips_db/asterisk_db/ami/ari`), username, secret (encrypted), fetched_at, rotated_at; unique (pbx_node_id, kind)                                                                                             |
+| `tenant_pbx_assignments`             | tenant_id (unique — หนึ่ง node ต่อ tenant), pbx_node_id, status (`active/suspended`)                                                                                                                                                |
+| `extensions`                         | tenant_id, pbx_node_id, extension_number (2–5 หลัก), display_name, status, voicemail_enabled, voicemail_pin (encrypted), calling_profile_id (null = default), `version`; unique (tenant_id, extension_number)                       |
+| `dial_numbers`                       | tenant_id, pbx_node_id, number, owner morph (extension / ring group); unique (tenant_id, number) — ทะเบียนเบอร์กลาง (D5)                                                                                                             |
+| `sip_credentials`                    | tenant_id, extension_id (unique), pbx_node_id, sip_username, secret (encrypted, D4), rotated_at; unique (tenant_id, sip_username) — ha1 คำนวณตอน apply                                                                             |
+| `ring_groups` / `ring_group_members` | number, name, strategy, ring_seconds, failover_type/id, status, version; สมาชิก (ring_group_id, extension_id, position)                                                                                                             |
+| `calling_profiles`                   | tenant_id, name, categories json (หมวด → `allow/code`), cross_tenant_scope (`all/selected`), is_default, version; unique (tenant_id, name)                                                                                          |
+| `calling_profile_destinations`       | calling_profile_id, destination_tenant_id — ใช้เมื่อ `cross_tenant_scope = selected`                                                                                                                                                |
+| `authorization_codes`                | tenant_id, label, user_id (nullable), categories json, `node_hash` = md5(auth_salt + รหัส), status, expires_at, version; unique (tenant_id, node_hash)                                                                               |
+| `config_revisions`                   | tenant_id, pbx_node_id, revision_number (unique ต่อ node), target (`number:<code><n>` / `domain:<code>` / `calling:<code>`), aggregate, checksum, compiled json (ไม่มี secret), status, validation_report, apply_result            |
+| `provisioning_operations`            | id (ulid = operation_id), tenant_id, type, aggregate, idempotency_key (unique ต่อ tenant), config_revision_id, status (`pending/running/applied/retrying/failed/superseded`), attempts, error_code, error_message, next_attempt_at |
+| `outbox_messages`                    | topic, payload json, available_at, dispatched_at                                                                                                                                                                                     |
+| `idempotency_keys`                   | tenant_id, key, request_hash, response_status, response_body, expires_at (24 ชม.)                                                                                                                                                    |
+| `personal_access_tokens`             | Sanctum + `tenant_id` (token ผูก tenant เดียว)                                                                                                                                                                                       |
+| `audit_logs`                         | tenant_id, actor_id, action, subject type/id, summary json (redacted), ip_address, created_at                                                                                                                                        |
+| _(แผน)_ `devices`                    | tenant_id, extension_id, vendor/model, mac, provisioning_profile, status                                                                                                                                                             |
+| _(แผน)_ `emergency_numbers`          | number, label, active (D7)                                                                                                                                                                                                           |
+| _(แผน P3)_ `call_records`            | tenant_id, pbx_node_id, uniqueid, linkedid, sequence, direction, src, dst, start/answer/end, duration, billsec, disposition, raw json; unique (pbx_node_id, uniqueid, sequence)                                                      |
+| _(แผน P3)_ `call_events`             | pbx_node_id, linkedid, uniqueid, event, payload json (redacted), occurred_at, dedupe_hash unique                                                                                                                                     |
+| _(แผน P3)_ `registration_snapshots`  | pbx_node_id, sip_username, contact, user_agent, received, expires_at, seen_at — ตอนนี้อ่าน `opensips.location` สดแทน                                                                                                                |
 
-กฎ: `tenant_id` มาจาก `TenantContext` เท่านั้น, global scope + policy ทุก model, FK/unique จริง, RLS เป็นทางเลือกภายหลัง
+กฎ: `tenant_id` มาจาก `TenantContext` เท่านั้น, global scope แบบ strict + policy ทุก model, FK/unique จริง, RLS เป็นทางเลือกภายหลัง
 
 ---
 
@@ -407,18 +415,19 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 
 - `extensions`: context `managed`, ใส่ marker ใน `appdata` ไม่ได้ → เก็บ ownership map ใน PostgreSQL (`config_revisions.compiled`) แล้ว reconcile เฉพาะ rows ที่อยู่ใน map
 
-### 6.2 Compile สำหรับ extension (MVP)
+### 6.2 Compile สำหรับ extension (ตาม D6/D7 — `NumberCompiler`)
 
-ตัวอย่าง tenant prefix `20`, extension `20101`:
+ตัวอย่าง tenant code `1042`, โดเมน `acme.sip.example.com`, extension `101`:
 
-- `opensips.subscriber`: `username=20101, domain=<sip_domain>, ha1=md5(20101:<sip_domain>:<password>)` (+ `ha1_sha256` ถ้าตารางมีและต้องการ)
-- `asterisk.extensions` (context `managed`, exten `20101`):
-    1. `GotoIf($["${CALLERID(num):0:2}" != "20"]?denied,1)` — กันโทรข้าม tenant (พึ่ง `route[untrusted_identity]` ใน §2 D1)
-    2. `Dial(PJSIP/20101@opensips,30)`
-    3. ถ้าเปิด voicemail: `VoiceMail(20101@t20,u)` แล้ว `Hangup()`; ไม่เปิด: `Hangup()`
-- exten `denied` (ใช้ร่วมทุก tenant): `Playback(ss-noservice)` แล้ว `Hangup(21)`
-- `asterisk.voicemail` (ถ้าเปิด): `context=t20` (ตั้งชื่อ voicemail context จาก prefix), `mailbox=20101, password=<pin>, fullname, email`
-- feature code ร่วม (เช่น `*97`) เป็น row เดียว: `VoiceMailMain(${CALLERID(num)}@t${CALLERID(num):0:2})` — ไม่ต้อง lookup เพราะ context ตั้งจาก prefix
+- `opensips.domain` (target `domain:1042`, เขียนตอน assign node): `domain=acme.sip.example.com, attrs=1042`
+- `opensips.subscriber`: `username=101, domain=acme.sip.example.com, ha1=md5(101:acme.sip.example.com:<password>)` + `ha1_sha256`
+- `asterisk.extensions` (context `managed`, target `number:1042101`):
+    - exten `1042101`: 1 `Dial(PJSIP/1042101@opensips,30)` → (ถ้าเปิด voicemail) `VoiceMail(101@t1042,${IF($["${DIALSTATUS}" = "BUSY"]?b:u)})` → `Hangup()` — OpenSIPS แปลง `1042101` กลับเป็น `101@acme.sip.example.com` ก่อน `lookup`
+    - exten `1042p101`: `Return(<flags>)` — สิทธิ์การโทรจาก calling profile (D7)
+- `asterisk.voicemail` (ถ้าเปิด): `context=t1042, mailbox=101, password=<pin>, fullname`
+- ต่อ tenant: `1042*97` → `VoiceMailMain(${CALLERID(num)}@t1042)`; ร่วมทุก tenant: `denied` → `Playback(ss-noservice)`, `Hangup(21)`
+- extension ที่ปิด / tenant หรือ assignment suspended: subscriber `ha1 = ha1_sha256 = "disabled"` (OpenSIPS ตอบ `403 Account disabled`) + exten → `Goto(denied,1)`, ไม่มี `1042p101`; ลบ = ไม่มีแถว
+- สิทธิ์ตามหมวดและรหัสอนุญาตอยู่ใน target `calling:1042` (`CallingCompiler`) — ดู D7 และ §12
 - ไม่เขียน `ps_*` สำหรับโทรศัพท์ (โทรศัพท์ register ที่ OpenSIPS); `ps_*` ใช้กับ trunk ใน Phase 4
 
 ### 6.3 Read-back / health check
