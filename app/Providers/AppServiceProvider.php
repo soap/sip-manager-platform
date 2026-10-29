@@ -69,6 +69,7 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureDevCommands(): void
     {
+        DevCommands::artisan('serve --port=8080', 'server');
         DevCommands::artisan('queue:listen --queue=provisioning,default --tries=1 --timeout=0', 'queue');
         DevCommands::artisan('schedule:work', 'scheduler');
     }
