@@ -9,7 +9,12 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping();
-Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping();
+/*
+| The overlap locks expire after a few minutes instead of the default day, so a scheduler killed
+| mid-run (e.g. stopping `composer run dev`) does not leave a lock that skips the task until tomorrow.
+*/
+
+Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping(1);
 Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();
-Schedule::command('authorization-codes:expire')->everyMinute()->withoutOverlapping();
+Schedule::command('authorization-codes:expire')->everyMinute()->withoutOverlapping(1);

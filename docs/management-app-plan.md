@@ -482,7 +482,7 @@ API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/
 
 ## 9. ลำดับงาน (milestones + เกณฑ์ผ่าน)
 
-สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน — รอทดสอบ D7 ด้วยโทรศัพท์จริง 2 tenant), M6–M7 ยังไม่เริ่ม — รายละเอียดใน §12
+สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6–M7 ยังไม่เริ่ม — รายละเอียดใน §12
 
 | #      | งาน                                                                                                                                                                                                       | เกณฑ์ผ่าน                                                                                                                                                            |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -663,7 +663,13 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - **API v1:** `calling-profiles` (+ `{id}/default`), `authorization-codes` (+ `{id}/reset`), `GET|PATCH cross-tenant`, `GET directory`, `PATCH extensions/{id}` รับ `calling_profile_id`, `GET extensions?calling_profile_id=`
 - **ทดสอบบน node lab** (แถวจาก `CallingCompiler` จริง, tenant ทดสอบ `0999`/`0998`/`0997`, ลบแล้ว): `/xa/` → ถึงปลายทางและเห็น `80999201`; `/` → denied; ปลายทางไม่รับ → denied; `/x0998/` → ถึง; `/x1042/` → denied; `/XA/` + รหัสถูก → ถึง, CDR `userfield = authcode:17`; `/XA/` + รหัสผิด 3 ครั้ง → denied (Hangup 21)
 - 254 tests, Larastan, vue-tsc, lint, build ผ่าน
-- ยังไม่ได้: ทดสอบด้วยโทรศัพท์จริงระหว่าง 2 tenant; หมวดโทรออก (รอ trunk, Phase 4); นับ `AuthCodeFailed` (Phase 3); `emergency_numbers`
+- ✅ ทดสอบด้วยโทรศัพท์จริงระหว่าง 2 tenant (29 ต.ค. 2026, tenant 1000/1001): "Internal only" → denied ("not in service"); "Other tenants" + ปลายทาง `all` → ดัง; "Internal, others with a code" + รหัสอนุญาต → ดัง — กดข้าม tenant ต้องมี `8` นำ (`81000201`); กด `1000201` ตรง ๆ = 404 เพราะ OpenSIPS เติม code ของผู้โทร
+- ยังไม่ได้: หมวดโทรออก (รอ trunk, Phase 4); นับ `AuthCodeFailed` (Phase 3); `emergency_numbers`
+
+### งานรอบ 29 ต.ค. 2026 (บ่าย, ยังไม่ commit)
+
+- tenant ที่สร้างก่อน D7 ไม่มี calling profile (สร้างเฉพาะใน `CreateTenant`) → migration `create_default_calling_profiles_for_existing_tenants` เรียก `ManageCallingProfiles::createDefaults()` ให้ tenant ที่ยังไม่มี
+- relay หยุดทั้งที่ `schedule:work` รัน: lock ของ `withoutOverlapping()` ค้าง 24 ชม. หลังปิด `composer run dev` ระหว่าง relay ทำงาน (`schedule:list` แสดง "Has Mutex"; แก้ทันทีด้วย `php artisan schedule:clear-cache`) → lock หมดอายุ 1 นาที (`provisioning:relay`, `authorization-codes:expire`) / 10 นาที (`nodes:sync`)
 
 ### งานรอบ 29 ต.ค. 2026 (commit แล้ว)
 
@@ -675,4 +681,4 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 
 ### ถัดไป
 
-`php artisan migrate` → ทดสอบ D7 ด้วยโทรศัพท์ 2 tenant (profile ภายใน/ข้าม tenant/ด้วยรหัส, ปลายทางรับ/ไม่รับ) → หน้า Operations
+หน้า Operations → M6 (reconciler + drift report) → M7 (CDR sync ก่อน AMI listener)
