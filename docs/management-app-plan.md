@@ -1,5 +1,6 @@
-# Telephony Management App — แผนพัฒนา v0.2
+# Telephony Management App — แผนพัฒนา v0.3
 
+อัปเดตล่าสุด: 29 ต.ค. 2026 (§4, §6.2, §8, §9, §12 ตรงกับโค้ดหลัง D6/D7; §2 D1 เก็บไว้เป็นประวัติ)
 อ้างอิง: _Telephony Platform Architecture — DigitalOcean Pilot v1.1_ (17 ต.ค. 2026) และโค้ด SIP Deployer ณ commit `72ef432`
 ขอบเขตแผนนี้: **Phase 2 (tenant/extension/device/provisioning) และ Phase 3 (CDR/events/monitoring) แบบละเอียด**, Phase 4–5 เป็นโครงเท่านั้น
 
@@ -10,9 +11,9 @@
 | เรื่อง            | ตัดสินใจ                                                                                                       |
 | ----------------- | -------------------------------------------------------------------------------------------------------------- |
 | แอป               | Laravel 13 แยกจาก SIP Deployer — Modular Monolith (`app/Modules/*`) ตาม §9                                     |
-| UI                | **Inertia 2 + Vue 3 + Tailwind** (สมมติ Vue — เปลี่ยนเป็น React ได้ ถ้าต้องการ) + REST API `/api/v1` (Sanctum) |
-| Database          | PostgreSQL 16 (desired state, CDR สำเนา, audit)                                                                |
-| Async             | Redis + Horizon; Transactional Outbox                                                                          |
+| UI                | **Inertia 3 + Vue 3 + TypeScript + Tailwind 4** (Laravel Vue starter kit, Wayfinder) + REST API `/api/v1` (Sanctum) |
+| Database          | PostgreSQL 16+ (desired state, CDR สำเนา, audit) — CI ใช้ PostgreSQL 17, tests ใช้ SQLite in-memory           |
+| Async             | Transactional Outbox + queue `provisioning`; ตอนนี้ใช้ database queue — Redis + Horizon เมื่อ deploy (Horizon ต้องใช้ ext-pcntl) |
 | Node manifest     | **Pull**: Management App เรียก API ของ SIP Deployer ด้วย token แบบอ่านอย่างเดียว                               |
 | การเชื่อมต่อ node | MariaDB (`opensips`, `asterisk`), AMI, ARI เท่านั้น — **ไม่มี SSH, ไม่เขียนไฟล์**                              |
 | Tests             | Pest 4, Laravel Boost (เหมือน SIP Deployer)                                                                    |
@@ -406,7 +407,7 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 2. API ตอบ `202 {operation_id}` (web UI แสดงสถานะ live)
 3. Outbox relay → dispatch `ApplyConfigRevision` บน queue `provisioning` (ShouldBeUnique ต่อ node → apply ทีละ revision ต่อ node)
 4. **Compile** — ได้ "rows ที่ต้องการ" ต่อ node (deterministic, เรียง, checksum)
-5. **Validate** — capability ของ node (เช่น voicemail เปิดไหม), หมายเลขอยู่ในช่วง prefix ของ tenant, ตัวเลขซ้ำ, ไม่ชน feature code (`*43`)
+5. **Validate** — capability ของ node (เช่น voicemail เปิดไหม, `dialplan.tenant_routing = domain`), node ยังไม่ถูกลบ; กติกาเลข (`NumberAllocator::PATTERN`) และเลขซ้ำตรวจตอนรับคำขอแล้ว
 6. **Apply** — diff กับ rows ปัจจุบันของ node แล้ว upsert/delete ภายใน transaction ต่อ db (opensips และ asterisk แยก transaction; ทำ opensips หลังสุดเพื่อไม่ให้โทรศัพท์ register ได้ก่อน dialplan พร้อม)
 7. **Read-back** — SELECT rows กลับมาเทียบ checksum + ตรวจผ่าน AMI (§6.3)
 8. ผล: `applied` / `retrying` (backoff 10s, 30s, 2m, 10m, 30m) / `failed` + alert
@@ -436,7 +437,7 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 | ------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `subscriber`             | ไม่ (auth_db query ทุกครั้ง)      | SELECT ha1 ตรงกับที่ compile                                                                                                                                                                                            |
 | `extensions` realtime    | ไม่                               | AMI `Getvar DIALPLAN_EXISTS(from-opensips,<n>,<p>)` = 1 ทุก priority (`dialplan show <n>@managed` ใช้ไม่ได้: context `managed` เข้าถึงผ่าน realtime switch ของ `from-opensips` เท่านั้น ไม่มีใน dialplan ในหน่วยความจำ) |
-| `voicemail`              | ไม่                               | AMI `Getvar VM_INFO(<n>@t<PP>,exists)` = 1 (`VoicemailUsersList` ไม่แสดง mailbox realtime ที่ยังไม่ถูกโหลด)                                                                                                             |
+| `voicemail`              | ไม่                               | AMI `Getvar VM_INFO(<ext>@t<code>,exists)` = 1 (`VoicemailUsersList` ไม่แสดง mailbox realtime ที่ยังไม่ถูกโหลด)                                                                                                             |
 | `queues`/`queue_members` | บางกรณี (`queue reload realtime`) | AMI `QueueStatus`                                                                                                                                                                                                       |
 | `ps_*` (trunk, P4)       | ไม่ (sorcery realtime)            | AMI `PJSIPShowEndpoint`                                                                                                                                                                                                 |
 
@@ -455,7 +456,7 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 
 ## 7. Phase 3 — CDR, Call Events, Monitoring
 
-- **CDR sync** (`cdr:sync` ทุก 1 นาทีต่อ node): อ่านตาราง `cdr` ด้วย watermark ที่ `end` ย้อนหลัง 5 นาที (กัน CDR ช้า) → upsert ด้วย (node, uniqueid, sequence) → map tenant จาก prefix 2 หลักของ src/dst — ต้องตรวจคอลัมน์จริงของ Alembic `cdr` บน server (มี `linkedid`, `sequence`, `peeraccount`)
+- **CDR sync** (`cdr:sync` ทุก 1 นาทีต่อ node): อ่านตาราง `cdr` ด้วย watermark ที่ `end` ย้อนหลัง 5 นาที (กัน CDR ช้า) → upsert ด้วย (node, uniqueid, sequence) → map tenant จาก 4 หลักแรกของ `dst` (tenant code ตาม D6) — ต้องตรวจคอลัมน์จริงของ Alembic `cdr` บน server (มี `linkedid`, `sequence`, `peeraccount`)
 - **AMI listener** (`ami:listen {node}`): ReactPHP/amphp socket client ขนาดเล็ก (ไม่ใช้ PAMI ที่ไม่ดูแลแล้ว), subscribe `call,cdr,reporting`, reconnect + backoff, heartbeat `Ping`; เขียน `call_events` ผ่าน queue `events` dedupe ด้วย hash(node, uniqueid, event, timestamp)
 - **Registration status**: อ่าน `opensips.location` ทุก 1 นาที → `registration_snapshots` (หน่วงได้ถึง ~60s จาก write-back — แสดงเวลาที่ "seen")
 - **Business monitoring** (ไม่ซ้ำกับ SIP Deployer): extension ที่ไม่ register, provisioning ค้าง/failed, CDR sync หยุด, AMI listener หลุด, reconcile พบ drift, register fail/สายผิดปกติต่อ tenant; แจ้งผ่าน mail/Slack
@@ -465,16 +466,23 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 
 ## 8. API v1 และหน้าจอ
 
-API (ตาม §12 ของ v1.1): `GET /tenant`, `GET|POST /extensions`, `GET|PATCH|DELETE /extensions/{id}`, `POST /extensions/{id}/devices`, `POST /extensions/{id}/rotate-credential`, `GET /operations/{id}`, `GET /call-records` — Idempotency-Key บน POST, `If-Match`/`version` บน PATCH, rate limit, pagination, SIP secret ตอบครั้งเดียว
+API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/`version` บน PATCH, rate limit 120/นาทีต่อ token, pagination, secret ตอบครั้งเดียว:
 
-หน้าจอ (Inertia/Vue):
+| สถานะ   | Endpoints `/api/v1`                                                                                                                                                                                                                                                                                                   |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ✅ มีแล้ว | `GET tenant`, `GET\|POST extensions`, `GET\|PATCH\|DELETE extensions/{id}`, `POST extensions/{id}/rotate-credential`, `GET operations/{id}`, `GET\|POST calling-profiles`, `GET\|PATCH\|DELETE calling-profiles/{id}`, `POST calling-profiles/{id}/default`, `GET\|POST authorization-codes`, `GET\|PATCH\|DELETE authorization-codes/{id}`, `POST authorization-codes/{id}/reset`, `GET\|PATCH cross-tenant`, `GET directory` |
+| ⏳ ยังไม่มี | voicemail / reapply / ring groups ใน API, `POST extensions/{id}/devices`, `GET call-records`, trunks / outbound-routes (Phase 4)                                                                                                                                                                                      |
 
-- **Platform admin**: Nodes (sync, manifest, credentials status, assignment), Tenants, Operations (ทั้งระบบ, retry), Drift report
-- **Tenant**: Dashboard (registered/total, สายวันนี้), Extensions (list/create/edit, reveal-once credential, rotate, สถานะ register), Devices, Voicemail, Call history (CDR), Operations, Audit log, API tokens, Members
+หน้าจอ (Inertia/Vue) — ✅ = มีแล้ว:
+
+- **Platform admin**: ✅ Nodes (`/admin/nodes`: sync, สถานะ endpoint, ทดสอบการเชื่อมต่อ, assign tenant), ✅ Tenants (`/admin/tenants`); ⏳ Operations (ทั้งระบบ, retry), Drift report
+- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens; ⏳ Devices, Call history (CDR), Operations
 
 ---
 
 ## 9. ลำดับงาน (milestones + เกณฑ์ผ่าน)
+
+สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน — รอทดสอบ D7 ด้วยโทรศัพท์จริง 2 tenant), M6–M7 ยังไม่เริ่ม — รายละเอียดใน §12
 
 | #      | งาน                                                                                                                                                                                                       | เกณฑ์ผ่าน                                                                                                                                                            |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -503,17 +511,19 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 
 ## 11. ความเสี่ยงและคำถามที่ยังเปิด
 
-1. ~~D1 multi-tenant ต่อ node~~ — ตัดสินแล้ว: ช่วงหมายเลข 5 หลักต่อ tenant (18 ต.ค. 2026); **เปลี่ยนเป็นโดเมนต่อ tenant ตาม D6 (21 ต.ค. 2026)** — ตาราง §4 และ §6.2 ยังเขียนตาม D1 จนกว่าจะทำ D6 เสร็จ
+1. ~~D1 multi-tenant ต่อ node~~ — ตัดสินแล้ว: ช่วงหมายเลข 5 หลักต่อ tenant (18 ต.ค. 2026); **เปลี่ยนเป็นโดเมนต่อ tenant ตาม D6 (21 ต.ค. 2026)** — ทำเสร็จแล้ว; §4 และ §6.2 อัปเดตตาม D6 (29 ต.ค. 2026)
 2. ~~D4 เก็บ SIP password แบบเข้ารหัสเพื่อ Yealink auto-provisioning หรือไม่~~ — ตัดสินแล้ว: เข้ารหัส (20 ต.ค. 2026)
 3. ~~สิทธิ์ของ extension~~ — ตัดสินแล้ว: calling profiles ตาม D7 (21 ต.ค. 2026); เดิม: สิทธิ์ของ extension ยังไม่กำหนด: โทรภายใน tenant ถึงกันได้ทุกเบอร์ (v1.1 §7 "อนุญาตเฉพาะ extension ที่มีสิทธิ์โทรถึงกัน" ยังไม่มีรูปแบบ), ค่าของ `outbound_policy`, limit ราย extension
 4. DB users `manager`/`asterisk_manager` เป็น `@'%'` และไม่ `REQUIRE SSL` — พึ่ง firewall + VPC; ควรจำกัด host เป็น private CIDR เมื่อย้าย VPC
 5. ARI เป็น HTTP — ใช้ได้เฉพาะใน VPC
 6. Management App deploy ที่ไหน (droplet แยก region เดียวกับ SIP node ตาม §5.1 รูปแบบ B) — ใช้ dployer/Ploi หรือ SIP Deployer สร้างให้?
-7. Vue 3 หรือ React
+7. ~~Vue 3 หรือ React~~ — ตัดสินแล้ว: Vue 3 + TypeScript (M1)
 
 ---
 
-## 12. สถานะ (19 ต.ค. 2026)
+## 12. สถานะ (29 ต.ค. 2026)
+
+งานทั้งหมดด้านล่างของ sip-manager commit ลง `main` แล้ว (19–29 ต.ค. 2026; ข้อความ "ยังไม่ commit" ในหัวข้อย่อยหมายถึง ณ วันที่เขียน) — ส่วนของ SIP Deployer ให้ตรวจใน repo นั้น
 
 ### M0 — SIP Deployer
 
@@ -654,6 +664,14 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - **ทดสอบบน node lab** (แถวจาก `CallingCompiler` จริง, tenant ทดสอบ `0999`/`0998`/`0997`, ลบแล้ว): `/xa/` → ถึงปลายทางและเห็น `80999201`; `/` → denied; ปลายทางไม่รับ → denied; `/x0998/` → ถึง; `/x1042/` → denied; `/XA/` + รหัสถูก → ถึง, CDR `userfield = authcode:17`; `/XA/` + รหัสผิด 3 ครั้ง → denied (Hangup 21)
 - 254 tests, Larastan, vue-tsc, lint, build ผ่าน
 - ยังไม่ได้: ทดสอบด้วยโทรศัพท์จริงระหว่าง 2 tenant; หมวดโทรออก (รอ trunk, Phase 4); นับ `AuthCodeFailed` (Phase 3); `emergency_numbers`
+
+### งานรอบ 29 ต.ค. 2026 (commit แล้ว)
+
+- `php artisan dev` / `composer dev` เปิด server ที่พอร์ต **8080** (`AppServiceProvider::configureDevCommands`) — `APP_URL` ใน `.env.example` ยังเป็น `:8000`
+- หน้า Welcome ใหม่ (ภาพรวม architecture: SIP domain ต่อ tenant, node pool, outbox → provisioning, read-back ผ่าน AMI)
+- CI (`.github/workflows/tests.yml`): PHP 8.4 + `pdo_pgsql`, Node 22, PostgreSQL 17 service → `composer setup` + `composer ci:check` (`vp check`, `vue-tsc`, Pint, Larastan, tests)
+- CaptainHook (`captainhook.json`): commit-msg (Beams: subject ≤ 50, body ≤ 72), pre-commit (PHP lint, `pint --dirty --test`, `npm run check`), pre-push (phpstan, tests)
+- README ระบุวิธีติดตั้ง, process ที่ต้องรัน และโครงสร้าง module
 
 ### ถัดไป
 

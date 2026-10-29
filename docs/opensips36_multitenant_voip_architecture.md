@@ -8,6 +8,8 @@
 
 > **ข้อกำหนดสำคัญ:** เอกสารนี้เป็นแบบออกแบบและ Implementation Baseline ไม่ใช่การรับรองว่า Configuration ผ่าน Syntax Validation หรือพร้อมใช้งาน Production แล้ว ต้องตรวจสอบกับ OpenSIPS 3.6 build, modules, database schema, network topology และค่าจริงของระบบก่อน deploy
 
+> **การนำไปใช้ใน sip-manager (29 ต.ค. 2026):** ใช้หลักการ SIP domain ต่อ tenant ของเอกสารนี้ตาม D6 ใน [management-app-plan.md](management-app-plan.md) แต่ต่างจากเอกสารนี้ 2 ข้อ — (1) **ไม่ใช้โหมด Direct-to-contact**: ทุกสายผ่าน Asterisk เพื่อ dialplan และ CDR; (2) **ไม่มี Policy Resolver ใน OpenSIPS**: สิทธิ์การโทร compile เป็นแถว dialplan ใน context `managed` (calling profiles, D7) — ไม่มีแถว = โทรไม่ได้ (fail closed). OpenSIPS ใช้ `domain` module (`attrs` = tenant code 4 หลัก) และเติม code หน้าเลขปลายทางก่อนส่งให้ Asterisk; `opensips.cfg` เป็นของ SIP Deployer
+
 ---
 
 ## 1. Executive Summary
