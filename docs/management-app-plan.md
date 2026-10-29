@@ -482,7 +482,7 @@ API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/
 
 ## 9. ลำดับงาน (milestones + เกณฑ์ผ่าน)
 
-สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ ในโค้ด (รอทดสอบ reinstall จริงจาก SIP Deployer), M7 ยังไม่เริ่ม — รายละเอียดใน §12
+สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ (reinstall จริงจาก SIP Deployer ผ่าน, โทรได้), M7 ยังไม่เริ่ม — รายละเอียดใน §12
 
 | #      | งาน                                                                                                                                                                                                       | เกณฑ์ผ่าน                                                                                                                                                            |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -679,15 +679,15 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - CaptainHook (`captainhook.json`): commit-msg (Beams: subject ≤ 50, body ≤ 72), pre-commit (PHP lint, `pint --dirty --test`, `npm run check`), pre-push (phpstan, tests)
 - README ระบุวิธีติดตั้ง, process ที่ต้องรัน และโครงสร้าง module
 
-### M6 — Reconciler + drift report (29 ต.ค. 2026, ยังไม่ commit)
+### M6 — Reconciler + drift report (29 ต.ค. 2026) ✅
 
 - `ReconcileNode` ต่อ node: compile desired state ของทุก tenant บน node (`domain:`, `calling:`, `number:` ทุกเบอร์ใน `dial_numbers` ของ node, + `denied` และ `<code>*97`) แล้วเทียบกับแถวจริงด้วย `NodeReadBack` (แยกออกจาก `ApplyRevision` — read-back เดียวกัน)
 - ผล: **missing / changed** → `RequestProvisioning` ใหม่ทีละ target (type `reconciled`, ผ่าน pipeline เดิม: retry, read-back, AMI, เห็นใน Operations); **unexpected** (exten ใน `managed`, subscriber ในโดเมนของ tenant, แถว `domain` ที่ไม่มี target ไหนเป็นเจ้าของ) → รายงานอย่างเดียว; exten เกินภายใต้ prefix ที่ `calling:` เป็นเจ้าของ (`_<code>`, `<code>a`, `<code>x`) นับเป็น changed ของ `calling:` (เขียนใหม่ = ลบออก); target ที่มี revision ค้าง (draft/validated/applying) ข้าม
 - `reconcile_runs` (status `clean/drift/failed`, trigger `schedule/sync/manual`, จำนวนแต่ละแบบ, `fixed_count`, รายการ drift สูงสุด 500)
 - รัน: `nodes:reconcile {node?} {--report-only}` ทุก 15 นาที; `nodes:sync` สั่ง job `ReconcilePbxNode` เมื่อ `services.opensips|asterisk.release|version` เปลี่ยน; ปุ่ม Reconcile now ในการ์ด node
 - node lab (report-only, 29 ต.ค.): 8 targets ตรงหมด; unexpected 7 = exten เก่าจากรูปแบบเลข D1 (`20101`, `20102`, `20103`, `20500`, `30101`, `30102`) และ `*97` ร่วมเดิม — ลบมือได้เมื่อแน่ใจ
-- ยังไม่ทำ: เทียบ mailbox ที่ไม่มีเจ้าของ (unexpected voicemail rows); ทดสอบ reinstall จริงตามเกณฑ์ผ่าน M6
+- ยังไม่ทำ: เทียบ mailbox ที่ไม่มีเจ้าของ (unexpected voicemail rows)
 
 ### ถัดไป
 
-✅ หน้า Operations → ✅ M6 (โค้ด) → ทดสอบ reinstall บน node lab → M7 (CDR sync ก่อน AMI listener)
+✅ หน้า Operations → ✅ M6 (reinstall บน node lab ผ่าน; ลบ extens เก่ายุค D1 7 ตัวแล้ว) → M7 (CDR sync ก่อน AMI listener)
