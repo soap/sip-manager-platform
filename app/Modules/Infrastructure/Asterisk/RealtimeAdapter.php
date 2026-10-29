@@ -104,6 +104,24 @@ class RealtimeAdapter
     }
 
     /**
+     * The name of every exten in the managed context, for finding rows nobody asked for.
+     *
+     * @return list<string>
+     */
+    public function extenNames(PbxNode $node): array
+    {
+        /** @var list<string> */
+        return $this->connections->asteriskDatabase($node)
+            ->table('extensions')
+            ->where('context', $this->context($node))
+            ->distinct()
+            ->orderBy('exten')
+            ->pluck('exten')
+            ->map(fn (mixed $exten): string => (string) $exten)
+            ->all();
+    }
+
+    /**
      * Prefixes are compared with substr() rather than LIKE, where "_" would match any character.
      *
      * @param  list<string>  $prefixes

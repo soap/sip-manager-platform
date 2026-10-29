@@ -44,6 +44,7 @@ const types: Record<string, string> = {
     'authorization_code.deleted': 'Authorization code deleted',
     'cross_tenant.changed': 'Cross-tenant calling changed',
     reapplied: 'Written again',
+    reconciled: 'Drift fixed',
 };
 
 const formatter = new Intl.DateTimeFormat(undefined, {

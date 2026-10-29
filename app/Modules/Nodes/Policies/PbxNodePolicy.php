@@ -32,4 +32,12 @@ class PbxNodePolicy
     {
         return $user->is_platform_admin;
     }
+
+    /**
+     * Comparing the node's rows with the desired state and writing drifted targets again.
+     */
+    public function reconcile(User $user, PbxNode $node): bool
+    {
+        return $user->is_platform_admin;
+    }
 }

@@ -6,6 +6,7 @@ import NodeController from '@/actions/App/Modules/Nodes/Http/Controllers/Admin/N
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import DriftReport from '@/components/nodes/DriftReport.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { index } from '@/routes/admin/nodes';
 import { index as tenantExtensions } from '@/routes/tenant/extensions';
+import type { ReconcileRun } from '@/types/provisioning';
 
 type NodeService = {
     release: string | null;
@@ -62,6 +64,8 @@ const props = defineProps<{
         synced_at: string | null;
         removed_at: string | null;
         tenant_routing: boolean;
+        can_reconcile: boolean;
+        reconcile: ReconcileRun | null;
         assignments: Assignment[];
     }[];
 }>();
@@ -309,6 +313,12 @@ function formatDate(value: string | null): string {
                 }}</CardDescription>
             </CardHeader>
             <CardContent class="grid gap-4">
+                <DriftReport
+                    v-if="node.can_reconcile"
+                    :node-id="node.id"
+                    :run="node.reconcile"
+                />
+
                 <p v-if="!node.tenant_routing" class="text-sm text-destructive">
                     This node serves one shared SIP domain. Reinstall OpenSIPS
                     and Asterisk from SIP Deployer, then sync, before adding

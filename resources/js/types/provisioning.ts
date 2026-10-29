@@ -2,6 +2,25 @@ import type { ProvisioningStatus } from '@/types/telephony';
 
 export type OperationFilter = 'all' | 'active' | 'failed';
 
+/** The newest comparison of a node's rows with the desired state. */
+export type ReconcileRun = {
+    status: 'running' | 'clean' | 'drift' | 'failed';
+    trigger: string;
+    targets_checked: number;
+    missing_count: number;
+    changed_count: number;
+    unexpected_count: number;
+    fixed_count: number;
+    drift: {
+        kind: 'missing' | 'changed' | 'unexpected';
+        target: string | null;
+        item: string;
+    }[];
+    error: string | null;
+    started_at: string;
+    finished_at: string | null;
+};
+
 /** One change on its way to a node, as the Operations pages list it. */
 export type Operation = {
     id: string;

@@ -18,3 +18,4 @@ Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping(10);
 Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping(1);
 Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();
 Schedule::command('authorization-codes:expire')->everyMinute()->withoutOverlapping(1);
+Schedule::command('nodes:reconcile')->everyFifteenMinutes()->withoutOverlapping(30);

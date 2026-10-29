@@ -16,6 +16,7 @@ use App\Modules\Provisioning\ErrorClassifier;
 use App\Modules\Provisioning\Exceptions\ProvisioningRejected;
 use App\Modules\Provisioning\Exceptions\ReadBackMismatch;
 use App\Modules\Provisioning\Models\ConfigRevision;
+use App\Modules\Provisioning\NodeReadBack;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -43,6 +44,7 @@ class ApplyRevision
         private OpenSipsDbAdapter $openSips,
         private AmiAdapter $ami,
         private ErrorClassifier $classifier,
+        private NodeReadBack $readBack,
     ) {}
 
     /**
@@ -134,16 +136,7 @@ class ApplyRevision
             $this->openSips->replaceSubscriber($node, $compiled->username, $compiled->sipDomain, $compiled->subscriber);
         }
 
-        $readBack = new CompiledNumber(
-            $compiled->number,
-            $compiled->state,
-            $compiled->sipDomain === null || $compiled->username === null ? null : ($this->openSips->subscribers($node, $compiled->username, $compiled->sipDomain)[0] ?? null),
-            $this->asterisk->exten($node, $compiled->number),
-            $mailboxKnown ? $this->asterisk->mailbox($node, (string) $compiled->voicemailContext, (string) $compiled->username) : null,
-            permissions: $this->asterisk->exten($node, $compiled->permissionExten()),
-        );
-
-        if ($readBack->checksum() !== $compiled->checksum()) {
+        if ($this->readBack->number($node, $compiled)->checksum() !== $compiled->checksum()) {
             throw new ReadBackMismatch("The rows of {$compiled->number} read back from {$node->name} differ from those written.");
         }
 
@@ -199,7 +192,7 @@ class ApplyRevision
         $this->asterisk->replaceExten($node, NumberCompiler::DENIED_EXTEN, $this->compiler->denied());
         $this->asterisk->replaceExtensStartingWith($node, $compiled->ownedPrefixes(), $compiled->extens);
 
-        if (CompiledCalling::checksumOf($this->asterisk->extensStartingWith($node, $compiled->ownedPrefixes())) !== $compiled->checksum()) {
+        if (CompiledCalling::checksumOf($this->readBack->calling($node, $compiled)) !== $compiled->checksum()) {
             throw new ReadBackMismatch("The calling dialplan of tenant {$tenantCode} read back from {$node->name} differs from the one written.");
         }
 

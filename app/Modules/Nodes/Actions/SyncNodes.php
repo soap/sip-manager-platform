@@ -8,6 +8,8 @@ use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
 use App\Modules\Nodes\Models\NodeSecret;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\SipDeployer;
+use App\Modules\Provisioning\Jobs\ReconcilePbxNode;
+use App\Modules\Provisioning\Models\ReconcileRun;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -15,7 +17,7 @@ use Illuminate\Support\Facades\Log;
  * Copies the node manifests from SIP Deployer. Passwords are fetched only when the deployer's
  * credentials_version differs from the one held, so they are read once per change rather than on
  * every sync. A node the deployer no longer lists is marked removed, never deleted, so its history
- * stays.
+ * stays. A node whose OpenSIPS or Asterisk changed release or version is reconciled.
  */
 class SyncNodes
 {
@@ -45,8 +47,14 @@ class SyncNodes
             }
 
             $listed[] = $deployerId;
+            $previousServices = PbxNode::query()->where('deployer_server_id', $deployerId)->value('services');
             $node = $this->store($deployerId, $manifest);
             $result['synced']++;
+
+            // a reinstall or upgrade may have left the node's databases without our rows
+            if (! $node->wasRecentlyCreated && self::serviceVersionsDiffer($previousServices ?? [], $node->services ?? [])) {
+                ReconcilePbxNode::dispatch($node->id, ReconcileRun::TRIGGER_SYNC);
+            }
 
             if ($node->wasRecentlyCreated) {
                 $result['added']++;
@@ -70,6 +78,25 @@ class SyncNodes
         });
 
         return $result;
+    }
+
+    /**
+     * Whether OpenSIPS or Asterisk changed release or version between two manifests.
+     *
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    public static function serviceVersionsDiffer(array $before, array $after): bool
+    {
+        foreach (['opensips', 'asterisk'] as $service) {
+            foreach (['release', 'version'] as $key) {
+                if (($before[$service][$key] ?? null) !== ($after[$service][$key] ?? null)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -67,6 +67,39 @@ class OpenSipsDbAdapter
     }
 
     /**
+     * Every row of the domain table, for finding domains nobody asked for.
+     *
+     * @return list<array{domain: string, attrs: string}>
+     */
+    public function domains(PbxNode $node): array
+    {
+        /** @var list<array{domain: string, attrs: string}> */
+        return $this->connections->openSipsDatabase($node)
+            ->table('domain')
+            ->orderBy('domain')
+            ->get(['domain', 'attrs'])
+            ->map(fn (object $row): array => ['domain' => trim((string) $row->domain), 'attrs' => trim((string) $row->attrs)])
+            ->all();
+    }
+
+    /**
+     * The usernames of every subscriber in the domain.
+     *
+     * @return list<string>
+     */
+    public function usernamesIn(PbxNode $node, string $domain): array
+    {
+        /** @var list<string> */
+        return $this->connections->openSipsDatabase($node)
+            ->table('subscriber')
+            ->where('domain', $domain)
+            ->orderBy('username')
+            ->pluck('username')
+            ->map(fn (mixed $username): string => trim((string) $username))
+            ->all();
+    }
+
+    /**
      * The registrations of the usernames in the domain that have not expired, newest first, from
      * the location table. OpenSIPS writes it back from memory periodically (sql-write-back), so a
      * fresh registration may take up to a minute to appear; a phone switched off without

@@ -28,4 +28,6 @@ enum OperationType: string
     case CrossTenantChanged = 'cross_tenant.changed';
     /** Asked again by hand, e.g. after a failure. */
     case Reapplied = 'reapplied';
+    /** The node's rows had drifted from the desired state (plan v0.2 §6.4). */
+    case Reconciled = 'reconciled';
 }

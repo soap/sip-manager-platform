@@ -166,6 +166,14 @@ function fakeNode(): FakeNodeDatabases
             );
         }
 
+        public function extenNames(PbxNode $node): array
+        {
+            $names = array_map(strval(...), array_keys($this->store->extens));
+            sort($names, SORT_STRING);
+
+            return $names;
+        }
+
         public function replaceMailbox(PbxNode $node, string $context, string $mailbox, ?array $box): void
         {
             unset($this->store->mailboxes["{$mailbox}@{$context}"]);
@@ -224,6 +232,19 @@ function fakeNode(): FakeNodeDatabases
         public function domain(PbxNode $node, string $tenantCode): ?array
         {
             return $this->store->domains[$tenantCode] ?? null;
+        }
+
+        public function domains(PbxNode $node): array
+        {
+            return array_values($this->store->domains);
+        }
+
+        public function usernamesIn(PbxNode $node, string $domain): array
+        {
+            return array_values(array_map(
+                fn (array $subscriber): string => $subscriber['username'],
+                array_filter($this->store->subscribers, fn (array $subscriber): bool => $subscriber['domain'] === $domain),
+            ));
         }
 
         public function registrations(PbxNode $node, string $domain, array $usernames): array

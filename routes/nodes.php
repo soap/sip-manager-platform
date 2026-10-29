@@ -9,6 +9,7 @@ Route::middleware(['auth', 'verified', EnsurePlatformAdmin::class])->prefix('adm
     Route::get('nodes', [NodeController::class, 'index'])->name('nodes.index');
     Route::post('nodes/sync', [NodeController::class, 'sync'])->middleware('throttle:6,1')->name('nodes.sync');
     Route::post('nodes/{node}/check', [NodeController::class, 'check'])->whereNumber('node')->middleware('throttle:12,1')->name('nodes.check');
+    Route::post('nodes/{node}/reconcile', [NodeController::class, 'reconcile'])->whereNumber('node')->middleware('throttle:6,1')->name('nodes.reconcile');
 
     Route::post('nodes/{node}/assignments', [AssignmentController::class, 'store'])->whereNumber('node')->name('nodes.assignments.store');
     Route::patch('assignments/{assignment}', [AssignmentController::class, 'update'])->whereNumber('assignment')->name('assignments.update');

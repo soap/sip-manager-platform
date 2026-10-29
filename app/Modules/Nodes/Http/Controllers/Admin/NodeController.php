@@ -9,6 +9,9 @@ use App\Modules\Nodes\Enums\AssignmentStatus;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Provisioning\Actions\ReconcileNode;
+use App\Modules\Provisioning\Jobs\ReconcilePbxNode;
+use App\Modules\Provisioning\Models\ReconcileRun;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
@@ -30,7 +33,7 @@ class NodeController extends Controller
                 ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
             'assignmentStatuses' => AssignmentStatus::options(),
             'nodes' => PbxNode::query()
-                ->with(['secrets', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
+                ->with(['secrets', 'latestReconcileRun', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
@@ -52,6 +55,20 @@ class NodeController extends Controller
                     'synced_at' => $node->synced_at?->toIso8601String(),
                     'removed_at' => $node->removed_at?->toIso8601String(),
                     'tenant_routing' => $node->hasTenantDomains(),
+                    'can_reconcile' => ReconcileNode::canReconcile($node),
+                    'reconcile' => $node->latestReconcileRun === null ? null : [
+                        'status' => $node->latestReconcileRun->status->value,
+                        'trigger' => $node->latestReconcileRun->trigger,
+                        'targets_checked' => $node->latestReconcileRun->targets_checked,
+                        'missing_count' => $node->latestReconcileRun->missing_count,
+                        'changed_count' => $node->latestReconcileRun->changed_count,
+                        'unexpected_count' => $node->latestReconcileRun->unexpected_count,
+                        'fixed_count' => $node->latestReconcileRun->fixed_count,
+                        'drift' => $node->latestReconcileRun->drift ?? [],
+                        'error' => $node->latestReconcileRun->error,
+                        'started_at' => $node->latestReconcileRun->started_at->toIso8601String(),
+                        'finished_at' => $node->latestReconcileRun->finished_at?->toIso8601String(),
+                    ],
                     'assignments' => $node->assignments
                         ->sortBy(fn (TenantPbxAssignment $assignment): string => $assignment->tenant->code)
                         ->values()
@@ -100,6 +117,17 @@ class NodeController extends Controller
         Inertia::flash('toast', $failed === []
             ? ['type' => 'success', 'message' => "Every endpoint of {$node->name} answered."]
             : ['type' => 'error', 'message' => "{$node->name}: ".implode(', ', $failed).' did not answer.']);
+
+        return redirect()->route('admin.nodes.index');
+    }
+
+    public function reconcile(PbxNode $node): RedirectResponse
+    {
+        Gate::authorize('reconcile', $node);
+
+        ReconcilePbxNode::dispatch($node->id, ReconcileRun::TRIGGER_MANUAL);
+
+        Inertia::flash('toast', ['type' => 'info', 'message' => "Comparing the rows on {$node->name} with what they should be. Drifted ones are written again."]);
 
         return redirect()->route('admin.nodes.index');
     }

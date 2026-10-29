@@ -5,9 +5,12 @@ use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Exceptions\SipDeployerUnavailable;
 use App\Modules\Nodes\Models\NodeSecret;
 use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Provisioning\Jobs\ReconcilePbxNode;
+use App\Modules\Provisioning\Models\ReconcileRun;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 
 beforeEach(function () {
     config(['services.sip_deployer.url' => 'https://deployer.test', 'services.sip_deployer.token' => 'deployer-token']);
@@ -205,4 +208,22 @@ it('fails on the command line when the deployer is not configured', function () 
     $this->artisan('nodes:sync')
         ->expectsOutputToContain('not configured')
         ->assertFailed();
+});
+
+it('reconciles a node whose OpenSIPS or Asterisk changed version', function () {
+    Queue::fake();
+    $upgraded = deployerManifest();
+    $upgraded['services']['asterisk']['version'] = '22.12.0';
+    Http::fakeSequence('deployer.test/api/v1/nodes')
+        ->push(['data' => [deployerManifest()]])
+        ->push(['data' => [deployerManifest()]])
+        ->push(['data' => [$upgraded]]);
+    Http::fake(['deployer.test/api/v1/nodes/7/credentials' => Http::response(deployerCredentials())]);
+
+    app(SyncNodes::class)->handle();
+    app(SyncNodes::class)->handle();
+    Queue::assertNothingPushed();
+
+    app(SyncNodes::class)->handle();
+    Queue::assertPushed(ReconcilePbxNode::class, fn (ReconcilePbxNode $job): bool => $job->nodeId === PbxNode::query()->sole()->id && $job->trigger === ReconcileRun::TRIGGER_SYNC);
 });

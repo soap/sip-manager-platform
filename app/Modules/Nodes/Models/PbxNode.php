@@ -4,6 +4,7 @@ namespace App\Modules\Nodes\Models;
 
 use App\Modules\Nodes\Enums\NodeSecretKind;
 use App\Modules\Nodes\Policies\PbxNodePolicy;
+use App\Modules\Provisioning\Models\ReconcileRun;
 use App\Modules\Tenancy\Models\Tenant;
 use Database\Factories\PbxNodeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -87,6 +89,16 @@ class PbxNode extends Model
     public function assignments(): HasMany
     {
         return $this->hasMany(TenantPbxAssignment::class);
+    }
+
+    /**
+     * The newest comparison of the node's rows with the desired state.
+     *
+     * @return HasOne<ReconcileRun, $this>
+     */
+    public function latestReconcileRun(): HasOne
+    {
+        return $this->hasOne(ReconcileRun::class)->latestOfMany('id');
     }
 
     /**
