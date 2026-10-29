@@ -29,11 +29,12 @@ use Illuminate\Support\Carbon;
  * @property ExtensionStatus $status
  * @property bool $voicemail_enabled
  * @property string|null $voicemail_pin Shown once when set; Asterisk keeps it in its voicemail table
+ * @property int|null $calling_profile_id Null: the tenant's default profile
  * @property int $version
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['tenant_id', 'pbx_node_id', 'extension_number', 'display_name', 'status', 'voicemail_enabled', 'voicemail_pin', 'version'])]
+#[Fillable(['tenant_id', 'pbx_node_id', 'extension_number', 'display_name', 'status', 'voicemail_enabled', 'voicemail_pin', 'calling_profile_id', 'version'])]
 #[Hidden(['voicemail_pin'])]
 #[UseFactory(ExtensionFactory::class)]
 class Extension extends Model
@@ -87,6 +88,28 @@ class Extension extends Model
     public function sipCredential(): HasOne
     {
         return $this->hasOne(SipCredential::class)->withoutGlobalScope(SipCredential::TENANT_SCOPE);
+    }
+
+    /**
+     * Its own calling profile; see effectiveCallingProfile() for the one that applies.
+     *
+     * @return BelongsTo<CallingProfile, $this>
+     */
+    public function callingProfile(): BelongsTo
+    {
+        return $this->belongsTo(CallingProfile::class)->withoutGlobalScope(CallingProfile::TENANT_SCOPE);
+    }
+
+    /**
+     * Its own profile, else the tenant's default; null only for a tenant without profiles, whose
+     * extensions may then call within the tenant only.
+     */
+    public function effectiveCallingProfile(): ?CallingProfile
+    {
+        return $this->callingProfile ?? CallingProfile::withoutTenantScope()
+            ->where('tenant_id', $this->tenant_id)
+            ->where('is_default', true)
+            ->first();
     }
 
     /**

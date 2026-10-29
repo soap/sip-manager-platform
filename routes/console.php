@@ -12,3 +12,4 @@ Artisan::command('inspire', function () {
 Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping();
 Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();
+Schedule::command('authorization-codes:expire')->everyMinute()->withoutOverlapping();

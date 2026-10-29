@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Telephony\Models\AuthorizationCode;
+use App\Modules\Telephony\Models\CallingProfile;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\ApiToken;
@@ -41,6 +43,8 @@ class AppServiceProvider extends ServiceProvider
             Extension::MORPH => Extension::class,
             RingGroup::MORPH => RingGroup::class,
             TenantPbxAssignment::MORPH => TenantPbxAssignment::class,
+            CallingProfile::MORPH => CallingProfile::class,
+            AuthorizationCode::MORPH => AuthorizationCode::class,
         ]);
 
         Sanctum::usePersonalAccessTokenModel(ApiToken::class);

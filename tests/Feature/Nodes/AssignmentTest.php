@@ -27,7 +27,7 @@ it('places a tenant on a node, which starts serving its SIP domain', function ()
     expect($tenant->pbxAssignment)
         ->pbx_node_id->toBe($node->id)
         ->status->toBe(AssignmentStatus::Active)
-        ->and(ConfigRevision::query()->sole()->target)->toBe('domain:1042');
+        ->and(ConfigRevision::query()->orderBy('id')->pluck('target')->all())->toBe(['domain:1042', 'calling:1042']);
 
     applyPendingRevisions();
 
@@ -75,7 +75,7 @@ it('suspends and resumes the tenant on its node', function () {
     $this->patch(route('admin.assignments.update', $assignment), ['status' => 'suspended'])->assertSessionHasNoErrors();
 
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Suspended)
-        ->and(ConfigRevision::query()->pluck('target')->all())->toBe(['number:1020201']);
+        ->and(ConfigRevision::query()->orderBy('id')->pluck('target')->all())->toBe(['number:1020201', 'calling:1020']);
 });
 
 it('takes a tenant off its node only without extensions, and the node stops serving its domain', function () {

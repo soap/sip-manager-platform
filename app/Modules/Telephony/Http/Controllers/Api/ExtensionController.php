@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
@@ -33,12 +34,14 @@ class ExtensionController extends Controller
     {
         $request->validate([
             'status' => ['sometimes', Rule::enum(ExtensionStatus::class)],
+            'calling_profile_id' => ['sometimes', 'integer'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
         $page = Extension::query()
             ->with('latestOperation')
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')->toString()))
+            ->when($request->filled('calling_profile_id'), fn ($query) => $query->where('calling_profile_id', $request->integer('calling_profile_id')))
             ->orderBy('extension_number')
             ->paginate($request->integer('per_page', 50))
             ->withQueryString();
@@ -77,12 +80,24 @@ class ExtensionController extends Controller
         }
 
         try {
-            $operation = $extensions->update(
-                $model,
-                $request->string('display_name', $model->display_name)->toString(),
-                $request->enum('status', ExtensionStatus::class) ?? $model->status,
-                $version,
-            );
+            $operation = DB::transaction(function () use ($request, $model, $extensions, $version): ?ProvisioningOperation {
+                $operation = $extensions->update(
+                    $model,
+                    $request->string('display_name', $model->display_name)->toString(),
+                    $request->enum('status', ExtensionStatus::class) ?? $model->status,
+                    $version,
+                );
+
+                if (! $request->has('calling_profile_id')) {
+                    return $operation;
+                }
+
+                // the version was checked above; the profile change bumps it again
+                return $extensions->setCallingProfile(
+                    $model->refresh(),
+                    $request->filled('calling_profile_id') ? $request->integer('calling_profile_id') : null,
+                ) ?? $operation;
+            });
         } catch (StaleVersion) {
             return $this->conflict($model);
         }

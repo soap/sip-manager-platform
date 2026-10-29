@@ -12,9 +12,10 @@ use Illuminate\Support\Carbon;
 
 /**
  * One change to bring to a node. It starts as a draft naming its target: a number as Asterisk knows
- * it, tenant code first (e.g. "number:1042101"), or a tenant's SIP domain ("domain:1042"). The apply
- * job compiles the target's desired state at that moment, writes it, reads it back, and fills in
- * what was written. Not tenant-scoped: the apply job works across tenants.
+ * it, tenant code first (e.g. "number:1042101"), a tenant's SIP domain ("domain:1042") or its
+ * calling dialplan ("calling:1042"). The apply job compiles the target's desired state at that
+ * moment, writes it, reads it back, and fills in what was written. Not tenant-scoped: the apply job
+ * works across tenants.
  *
  * @property int $id
  * @property string|null $tenant_id
@@ -40,6 +41,8 @@ class ConfigRevision extends Model
     public const NUMBER_TARGET_PREFIX = 'number:';
 
     public const DOMAIN_TARGET_PREFIX = 'domain:';
+
+    public const CALLING_TARGET_PREFIX = 'calling:';
 
     protected $attributes = [
         'status' => 'draft',
@@ -71,6 +74,14 @@ class ConfigRevision extends Model
     }
 
     /**
+     * A tenant's calling dialplan (plan D7): cross-tenant calls, outbound categories, authorization codes.
+     */
+    public static function callingTarget(string $tenantCode): string
+    {
+        return self::CALLING_TARGET_PREFIX.$tenantCode;
+    }
+
+    /**
      * The number this revision writes, tenant code first, or null for another kind of target.
      */
     public function targetNumber(): ?string
@@ -84,6 +95,14 @@ class ConfigRevision extends Model
     public function targetDomainCode(): ?string
     {
         return str_starts_with($this->target, self::DOMAIN_TARGET_PREFIX) ? substr($this->target, strlen(self::DOMAIN_TARGET_PREFIX)) : null;
+    }
+
+    /**
+     * The code of the tenant whose calling dialplan this revision writes, or null for another target.
+     */
+    public function targetCallingCode(): ?string
+    {
+        return str_starts_with($this->target, self::CALLING_TARGET_PREFIX) ? substr($this->target, strlen(self::CALLING_TARGET_PREFIX)) : null;
     }
 
     /**

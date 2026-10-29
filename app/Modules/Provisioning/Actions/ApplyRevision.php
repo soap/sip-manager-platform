@@ -6,6 +6,8 @@ use App\Modules\Infrastructure\Asterisk\AmiAdapter;
 use App\Modules\Infrastructure\Asterisk\RealtimeAdapter;
 use App\Modules\Infrastructure\OpenSips\OpenSipsDbAdapter;
 use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Provisioning\Compiler\CallingCompiler;
+use App\Modules\Provisioning\Compiler\CompiledCalling;
 use App\Modules\Provisioning\Compiler\CompiledNumber;
 use App\Modules\Provisioning\Compiler\NumberCompiler;
 use App\Modules\Provisioning\Enums\OperationStatus;
@@ -25,8 +27,9 @@ use Throwable;
  * Asterisk over AMI whether it sees the dialplan and the mailbox. Ends applied, retrying with backoff,
  * or failed.
  *
- * A target is a number (exten, tenant code first) or a tenant's SIP domain (its row in the OpenSIPS
- * domain table, which tells OpenSIPS the tenant code of the domain's phones).
+ * A target is a number (exten, tenant code first), a tenant's SIP domain (its row in the OpenSIPS
+ * domain table, which tells OpenSIPS the tenant code of the domain's phones) or a tenant's calling
+ * dialplan (plan D7: every exten it owns for calls beyond its own numbers, replaced as a whole).
  */
 class ApplyRevision
 {
@@ -35,6 +38,7 @@ class ApplyRevision
 
     public function __construct(
         private NumberCompiler $compiler,
+        private CallingCompiler $calling,
         private RealtimeAdapter $asterisk,
         private OpenSipsDbAdapter $openSips,
         private AmiAdapter $ami,
@@ -85,8 +89,9 @@ class ApplyRevision
         $node = $revision->node;
         $number = $revision->targetNumber();
         $domainCode = $revision->targetDomainCode();
+        $callingCode = $revision->targetCallingCode();
 
-        if ($number === null && $domainCode === null) {
+        if ($number === null && $domainCode === null && $callingCode === null) {
             throw ProvisioningRejected::because('unknown_target', "Revision {$revision->id} has an unknown target {$revision->target}.");
         }
 
@@ -94,6 +99,10 @@ class ApplyRevision
 
         if ($domainCode !== null) {
             return $this->applyDomain($revision, $domainCode);
+        }
+
+        if ($callingCode !== null) {
+            return $this->applyCalling($revision, $callingCode);
         }
 
         $compiled = $this->compiler->compile($node, (string) $number);
@@ -113,6 +122,7 @@ class ApplyRevision
         }
 
         $this->asterisk->replaceExten($node, $compiled->number, $compiled->dialplan);
+        $this->asterisk->replaceExten($node, $compiled->permissionExten(), $compiled->permissions);
 
         $mailboxKnown = $compiled->voicemailContext !== null && $compiled->username !== null && $node->hasVoicemail();
 
@@ -130,6 +140,7 @@ class ApplyRevision
             $compiled->sipDomain === null || $compiled->username === null ? null : ($this->openSips->subscribers($node, $compiled->username, $compiled->sipDomain)[0] ?? null),
             $this->asterisk->exten($node, $compiled->number),
             $mailboxKnown ? $this->asterisk->mailbox($node, (string) $compiled->voicemailContext, (string) $compiled->username) : null,
+            permissions: $this->asterisk->exten($node, $compiled->permissionExten()),
         );
 
         if ($readBack->checksum() !== $compiled->checksum()) {
@@ -172,6 +183,63 @@ class ApplyRevision
     }
 
     /**
+     * Replaces every exten the tenant owns for calls beyond its own numbers, reads them back, and
+     * asks Asterisk whether it finds each one: a pattern by a number it matches.
+     *
+     * @return array{checksum: string, compiled: array<string, mixed>, state: string, asterisk: string}
+     */
+    private function applyCalling(ConfigRevision $revision, string $tenantCode): array
+    {
+        $node = $revision->node;
+        $compiled = $this->calling->compile($node, $tenantCode);
+
+        $revision->update(['status' => RevisionStatus::Validated, 'validation_report' => ['ok' => true, 'state' => $compiled->state]]);
+
+        // refused calls go there
+        $this->asterisk->replaceExten($node, NumberCompiler::DENIED_EXTEN, $this->compiler->denied());
+        $this->asterisk->replaceExtensStartingWith($node, $compiled->ownedPrefixes(), $compiled->extens);
+
+        if (CompiledCalling::checksumOf($this->asterisk->extensStartingWith($node, $compiled->ownedPrefixes())) !== $compiled->checksum()) {
+            throw new ReadBackMismatch("The calling dialplan of tenant {$tenantCode} read back from {$node->name} differs from the one written.");
+        }
+
+        $asterisk = 'unchecked';
+
+        if (isset($node->endpoints['ami'])) {
+            $this->ensureSeen($node, $this->ami->missingPrioritiesOf($node, array_combine(
+                array_map(fn (string $exten): string => CompiledCalling::probeNumber($exten), array_keys($compiled->extens)),
+                array_map(count(...), $compiled->extens),
+            )));
+            $asterisk = 'confirmed';
+        }
+
+        return [
+            'checksum' => $compiled->checksum(),
+            'compiled' => $compiled->withoutSecrets(),
+            'state' => $compiled->state,
+            'asterisk' => $asterisk,
+        ];
+    }
+
+    /**
+     * @param  array<string, list<int>>  $missing  exten => priorities Asterisk does not find
+     *
+     * @throws ReadBackMismatch
+     */
+    private function ensureSeen(PbxNode $node, array $missing): void
+    {
+        foreach ($missing as $exten => $priorities) {
+            throw new ReadBackMismatch(sprintf(
+                'Asterisk on %s does not see priorities %s of %s in %s.',
+                $node->name,
+                implode(', ', $priorities),
+                $exten,
+                $this->ami->entryContext($node),
+            ));
+        }
+    }
+
+    /**
      * The tenant's phones need its domain on the node; written with each of its numbers, so a
      * reinstalled node gets it back with the first number written again.
      */
@@ -197,17 +265,10 @@ class ApplyRevision
             return 'unchecked';
         }
 
-        $missing = $this->ami->missingPriorities($node, $compiled->number, count($compiled->dialplan));
-
-        if ($missing !== []) {
-            throw new ReadBackMismatch(sprintf(
-                'Asterisk on %s does not see priorities %s of %s in %s.',
-                $node->name,
-                implode(', ', $missing),
-                $compiled->number,
-                $this->ami->entryContext($node),
-            ));
-        }
+        $this->ensureSeen($node, $this->ami->missingPrioritiesOf($node, [
+            $compiled->number => count($compiled->dialplan),
+            $compiled->permissionExten() => count($compiled->permissions),
+        ]));
 
         $box = $compiled->voicemail;
 

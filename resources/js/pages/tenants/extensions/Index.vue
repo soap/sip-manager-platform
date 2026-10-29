@@ -44,6 +44,8 @@ type Extension = {
     display_name: string;
     status: ExtensionStatus;
     voicemail_enabled: boolean;
+    /** null: the tenant's default profile */
+    calling_profile_id: number | null;
     version: number;
     provisioning: ProvisioningState | null;
 };
@@ -75,6 +77,7 @@ const props = defineProps<{
     registrations?: Record<number, RegistrationState>;
     nextNumber: string | null;
     statuses: { value: ExtensionStatus; label: string }[];
+    callingProfiles: { id: number; name: string; is_default: boolean }[];
     canManage: boolean;
     provisioningStalled: ProvisioningStall | null;
 }>();
@@ -195,6 +198,35 @@ function update(extension: Extension, changes: Partial<Extension>): void {
                 status: extension.status,
                 version: extension.version,
                 ...changes,
+            },
+            preserveScroll: true,
+            preserveState: false,
+        },
+    );
+}
+
+/** "" is the tenant's default profile. */
+const profileOptions = computed(() => [
+    {
+        value: '',
+        label: `Default (${props.callingProfiles.find((profile) => profile.is_default)?.name ?? 'internal only'})`,
+    },
+    ...props.callingProfiles.map((profile) => ({
+        value: String(profile.id),
+        label: profile.name,
+    })),
+]);
+
+function setCallingProfile(extension: Extension, value: string): void {
+    router.visit(
+        ExtensionController.callingProfile({
+            tenant: tenant.value.slug,
+            extension: extension.id,
+        }),
+        {
+            data: {
+                calling_profile_id: value === '' ? null : Number(value),
+                version: extension.version,
             },
             preserveScroll: true,
             preserveState: false,
@@ -450,6 +482,7 @@ function remove(extension: Extension): void {
         <InputError
             :message="
                 errors.extension ??
+                errors.calling_profile_id ??
                 errors.voicemail ??
                 errors.display_name ??
                 errors.status
@@ -469,6 +502,7 @@ function remove(extension: Extension): void {
                         >
                             Voicemail
                         </th>
+                        <th class="px-4 py-2 font-medium">Calling</th>
                         <th class="px-4 py-2 font-medium">PBX</th>
                         <th class="px-4 py-2 font-medium">Phone</th>
                         <th v-if="canManage" class="px-4 py-2" />
@@ -542,6 +576,32 @@ function remove(extension: Extension): void {
                             </div>
                         </td>
                         <td class="px-4 py-2">
+                            <NativeSelect
+                                v-if="canManage"
+                                class="w-48"
+                                :aria-label="`Calling profile of ${extension.extension_number}`"
+                                :options="profileOptions"
+                                :model-value="
+                                    extension.calling_profile_id === null
+                                        ? ''
+                                        : String(extension.calling_profile_id)
+                                "
+                                @update:model-value="
+                                    (value) =>
+                                        setCallingProfile(extension, value)
+                                "
+                            />
+                            <span v-else class="text-xs">{{
+                                profileOptions.find(
+                                    (option) =>
+                                        option.value ===
+                                        String(
+                                            extension.calling_profile_id ?? '',
+                                        ),
+                                )?.label
+                            }}</span>
+                        </td>
+                        <td class="px-4 py-2">
                             <ProvisioningBadge
                                 :provisioning="extension.provisioning"
                             />
@@ -594,7 +654,7 @@ function remove(extension: Extension): void {
                     <tr v-if="extensions.length === 0">
                         <td
                             :colspan="
-                                (canManage ? 6 : 5) +
+                                (canManage ? 7 : 6) +
                                 (assignment?.voicemail ? 1 : 0)
                             "
                             class="px-4 py-6 text-center text-muted-foreground"

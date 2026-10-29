@@ -8,6 +8,7 @@ use App\Modules\Provisioning\Enums\OperationType;
 use App\Modules\Provisioning\Models\ProvisioningOperation;
 use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\Exceptions\StaleVersion;
+use App\Modules\Telephony\Models\CallingProfile;
 use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\SipCredential;
@@ -208,6 +209,47 @@ class ManageExtensions
             $this->audit->record('extension.voicemail_pin_reset', $extension, ['number' => $extension->extension_number]);
 
             return ['pin' => $pin, 'operation' => $operation];
+        });
+    }
+
+    /**
+     * Gives the extension a calling profile of the tenant, or the default with null (plan D7).
+     *
+     * @return ProvisioningOperation|null the operation when the profile changed
+     *
+     * @throws StaleVersion
+     */
+    public function setCallingProfile(Extension $extension, ?int $profileId, ?int $expectedVersion = null): ?ProvisioningOperation
+    {
+        $profile = $profileId === null ? null : CallingProfile::query()->find($profileId)
+            ?? throw ValidationException::withMessages(['calling_profile_id' => 'Choose one of the tenant\'s calling profiles.']);
+
+        if ($extension->calling_profile_id === $profile?->id) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($extension, $profile, $expectedVersion): ProvisioningOperation {
+            $before = $extension->callingProfile?->name;
+
+            $updated = Extension::query()
+                ->whereKey($extension->id)
+                ->when($expectedVersion !== null, fn ($query) => $query->where('version', $expectedVersion))
+                ->update(['calling_profile_id' => $profile?->id, 'version' => DB::raw('version + 1'), 'updated_at' => now()]);
+
+            if ($updated === 0) {
+                throw StaleVersion::of('extension', 'extension');
+            }
+
+            $extension->refresh();
+            $operation = $this->provision($extension, OperationType::CallingProfileChanged);
+
+            $this->audit->record('extension.calling_profile_changed', $extension, [
+                'number' => $extension->extension_number,
+                'from' => $before,
+                'to' => $profile?->name,
+            ]);
+
+            return $operation;
         });
     }
 

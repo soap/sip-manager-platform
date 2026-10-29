@@ -172,7 +172,8 @@ it('suspends and resumes every number of a tenant with its assignment', function
     $this->patch(route('admin.assignments.update', $assignment), ['status' => 'suspended'])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
-    expect(ProvisioningOperation::query()->where('type', OperationType::AssignmentChanged)->count())->toBe(2)
+    // its two numbers and its calling dialplan
+    expect(ProvisioningOperation::query()->where('type', OperationType::AssignmentChanged)->count())->toBe(3)
         ->and(array_unique(array_column($node->subscribers, 'ha1')))->toBe(['disabled']);
     foreach ($numbers as $number) {
         expect($node->extens["1020{$number}"])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
@@ -287,7 +288,7 @@ it('trusts the database read-back on a node without AMI', function () {
 
 it('retries when AMI does not answer and fails when it refuses the login', function (Throwable $exception, ?int $retryIn, string $errorCode) {
     fakeNode();
-    $this->mock(AmiAdapter::class)->shouldReceive('missingPriorities')->andThrow($exception);
+    $this->mock(AmiAdapter::class)->shouldReceive('missingPrioritiesOf')->andThrow($exception);
     [$tenant] = provisioningTenant();
     $this->post(route('tenant.extensions.store', $tenant), ['extension_number' => '201', 'display_name' => 'Reception']);
 

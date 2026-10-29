@@ -11,6 +11,7 @@ use App\Modules\Telephony\Enums\ExtensionStatus;
 use App\Modules\Telephony\ExtensionRegistrations;
 use App\Modules\Telephony\Http\Requests\StoreExtensionRequest;
 use App\Modules\Telephony\Http\Requests\UpdateExtensionRequest;
+use App\Modules\Telephony\Models\CallingProfile;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Http\RedirectResponse;
@@ -47,9 +48,11 @@ class ExtensionController extends Controller
                 'display_name' => $extension->display_name,
                 'status' => $extension->status->value,
                 'voicemail_enabled' => $extension->voicemail_enabled,
+                'calling_profile_id' => $extension->calling_profile_id,
                 'version' => $extension->version,
                 'provisioning' => $operations->get($extension->id),
             ]),
+            'callingProfiles' => CallingProfile::query()->orderBy('name')->get(['id', 'name', 'is_default'])->map(fn (CallingProfile $profile): array => $profile->only('id', 'name', 'is_default')),
             // read live from the node after the page shows, so a slow or unreachable node never holds it up
             'registrations' => Inertia::defer(fn (): array => $registrations->of($list)),
             'nextNumber' => $extensions->nextFreeNumber(),
@@ -134,6 +137,26 @@ class ExtensionController extends Controller
         $this->revealVoicemailPin($model, $extensions->resetVoicemailPin($model)['pin']);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => "New voicemail PIN for {$model->extension_number}."]);
+
+        return back();
+    }
+
+    public function callingProfile(Request $request, Tenant $tenant, int $extension, ManageExtensions $extensions): RedirectResponse
+    {
+        Gate::authorize('manageExtensions', $tenant);
+        $request->validate([
+            'calling_profile_id' => ['present', 'nullable', 'integer'],
+            'version' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $model = Extension::query()->findOrFail($extension);
+        $extensions->setCallingProfile(
+            $model,
+            $request->filled('calling_profile_id') ? $request->integer('calling_profile_id') : null,
+            $request->filled('version') ? $request->integer('version') : null,
+        );
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => "Calling profile of {$model->extension_number} changed. It is being written to the PBX."]);
 
         return back();
     }

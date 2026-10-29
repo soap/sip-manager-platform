@@ -3,6 +3,7 @@
 namespace App\Modules\Tenancy\Actions;
 
 use App\Modules\Audit\Audit;
+use App\Modules\Telephony\Actions\ManageCallingProfiles;
 use App\Modules\Tenancy\Enums\TenantRole;
 use App\Modules\Tenancy\Models\Tenant;
 use App\Modules\Tenancy\Models\TenantMembership;
@@ -12,12 +13,13 @@ use Illuminate\Validation\ValidationException;
 
 class CreateTenant
 {
-    public function __construct(private InviteUser $invite, private Audit $audit) {}
+    public function __construct(private InviteUser $invite, private Audit $audit, private ManageCallingProfiles $profiles) {}
 
     public function handle(string $name, string $slug, string $ownerName, string $ownerEmail): Tenant
     {
         return DB::transaction(function () use ($name, $slug, $ownerName, $ownerEmail): Tenant {
             $tenant = $this->createWithCode($name, $slug);
+            $this->profiles->createDefaults($tenant);
             $owner = $this->invite->handle($ownerName, $ownerEmail);
 
             TenantMembership::query()->create([

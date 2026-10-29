@@ -1,5 +1,7 @@
 <?php
 
+use App\Modules\Telephony\Http\Controllers\AuthorizationCodeController;
+use App\Modules\Telephony\Http\Controllers\CallingPermissionController;
 use App\Modules\Telephony\Http\Controllers\ExtensionController;
 use App\Modules\Telephony\Http\Controllers\RingGroupController;
 use App\Modules\Tenancy\Http\Middleware\SetTenantContext;
@@ -14,6 +16,17 @@ Route::middleware(['auth', 'verified', SetTenantContext::class])->prefix('t/{ten
     Route::patch('extensions/{extension}/voicemail', [ExtensionController::class, 'voicemail'])->whereNumber('extension')->name('extensions.voicemail');
     Route::post('extensions/{extension}/voicemail-pin', [ExtensionController::class, 'resetVoicemailPin'])->whereNumber('extension')->middleware('throttle:10,1')->name('extensions.voicemail-pin');
     Route::post('extensions/{extension}/reapply', [ExtensionController::class, 'reapply'])->whereNumber('extension')->middleware('throttle:10,1')->name('extensions.reapply');
+    Route::patch('extensions/{extension}/calling-profile', [ExtensionController::class, 'callingProfile'])->whereNumber('extension')->name('extensions.calling-profile');
+    Route::get('calling', [CallingPermissionController::class, 'index'])->name('calling.index');
+    Route::post('calling-profiles', [CallingPermissionController::class, 'storeProfile'])->name('calling-profiles.store');
+    Route::patch('calling-profiles/{profile}', [CallingPermissionController::class, 'updateProfile'])->whereNumber('profile')->name('calling-profiles.update');
+    Route::post('calling-profiles/{profile}/default', [CallingPermissionController::class, 'makeDefault'])->whereNumber('profile')->name('calling-profiles.default');
+    Route::delete('calling-profiles/{profile}', [CallingPermissionController::class, 'destroyProfile'])->whereNumber('profile')->name('calling-profiles.destroy');
+    Route::patch('cross-tenant', [CallingPermissionController::class, 'updateInbound'])->name('cross-tenant.update');
+    Route::post('authorization-codes', [AuthorizationCodeController::class, 'store'])->middleware('throttle:20,1')->name('authorization-codes.store');
+    Route::patch('authorization-codes/{code}', [AuthorizationCodeController::class, 'update'])->whereNumber('code')->name('authorization-codes.update');
+    Route::post('authorization-codes/{code}/reset', [AuthorizationCodeController::class, 'reset'])->whereNumber('code')->middleware('throttle:10,1')->name('authorization-codes.reset');
+    Route::delete('authorization-codes/{code}', [AuthorizationCodeController::class, 'destroy'])->whereNumber('code')->name('authorization-codes.destroy');
     Route::get('ring-groups', [RingGroupController::class, 'index'])->name('ring-groups.index');
     Route::post('ring-groups', [RingGroupController::class, 'store'])->name('ring-groups.store');
     Route::get('ring-groups/{ringGroup}/edit', [RingGroupController::class, 'edit'])->whereNumber('ringGroup')->name('ring-groups.edit');

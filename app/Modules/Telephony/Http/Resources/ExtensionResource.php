@@ -26,6 +26,8 @@ class ExtensionResource extends JsonResource
             'display_name' => $this->display_name,
             'status' => $this->status->value,
             'voicemail_enabled' => $this->voicemail_enabled,
+            // null: the tenant's default calling profile
+            'calling_profile_id' => $this->calling_profile_id,
             'version' => $this->version,
             'provisioning' => $this->whenLoaded('latestOperation', fn (): ?array => $this->latestOperation === null ? null : $this->provisioning($this->latestOperation)),
             // read live from the node on GET (ExtensionRegistrations): registered, not_registered or unknown

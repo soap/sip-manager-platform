@@ -46,6 +46,39 @@ class FakeNodeDatabases
 
     /** The location table cannot be read, e.g. the node is down. */
     public bool $locationUnreachable = false;
+
+    /**
+     * The priorities of the first pattern exten that matches the number, as pbx_realtime finds it.
+     *
+     * @return list<array{priority: int, app: string, appdata: string}>
+     */
+    public function matchingPattern(string $number): array
+    {
+        foreach ($this->extens as $exten => $priorities) {
+            if (str_starts_with($exten, '_') && preg_match(asteriskPatternRegex($exten), $number) === 1) {
+                return $priorities;
+            }
+        }
+
+        return [];
+    }
+}
+
+/**
+ * The regex of an Asterisk pattern such as _1042[2-7]XXX. (X, Z, N, [..], . and !).
+ */
+function asteriskPatternRegex(string $pattern): string
+{
+    $regex = (string) preg_replace_callback('/\[[^\]]+\]|[XZN.!]|[^XZN.!\[]+/', fn (array $match): string => match ($match[0]) {
+        'X' => '[0-9]',
+        'Z' => '[1-9]',
+        'N' => '[2-9]',
+        '.' => '.+',
+        '!' => '.*',
+        default => str_starts_with($match[0], '[') ? $match[0] : preg_quote($match[0], '/'),
+    }, substr($pattern, 1));
+
+    return '/^'.$regex.'$/';
 }
 
 /**
@@ -63,11 +96,19 @@ function fakeNode(): FakeNodeDatabases
             parent::__construct($connections);
         }
 
-        public function missingPriorities(PbxNode $node, string $exten, int $count): array
+        public function missingPrioritiesOf(PbxNode $node, array $counts): array
         {
-            $seen = $this->store->asteriskBlind ? 0 : count($this->store->extens[$exten] ?? []);
+            $missing = [];
 
-            return $count > $seen ? range($seen + 1, $count) : [];
+            foreach (array_filter($counts) as $exten => $count) {
+                $seen = $this->store->asteriskBlind ? 0 : count($this->store->extens[$exten] ?? $this->store->matchingPattern((string) $exten));
+
+                if ($count > $seen) {
+                    $missing[(string) $exten] = range($seen + 1, $count);
+                }
+            }
+
+            return $missing;
         }
 
         public function hasMailbox(PbxNode $node, string $mailbox, string $context): bool
@@ -99,6 +140,30 @@ function fakeNode(): FakeNodeDatabases
         public function exten(PbxNode $node, string $exten): array
         {
             return $this->store->extens[$exten] ?? [];
+        }
+
+        public function replaceExtensStartingWith(PbxNode $node, array $prefixes, array $extens): void
+        {
+            if ($this->store->failWith !== null) {
+                throw $this->store->failWith;
+            }
+
+            foreach (array_keys($this->extensStartingWith($node, $prefixes)) as $exten) {
+                unset($this->store->extens[$exten]);
+            }
+
+            foreach ($extens as $exten => $priorities) {
+                $this->store->extens[$exten] = $priorities;
+            }
+        }
+
+        public function extensStartingWith(PbxNode $node, array $prefixes): array
+        {
+            return array_filter(
+                $this->store->extens,
+                fn (string $exten): bool => array_any($prefixes, fn (string $prefix): bool => str_starts_with($exten, $prefix)),
+                ARRAY_FILTER_USE_KEY,
+            );
         }
 
         public function replaceMailbox(PbxNode $node, string $context, string $mailbox, ?array $box): void

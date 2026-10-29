@@ -34,16 +34,41 @@ class AmiAdapter
      */
     public function missingPriorities(PbxNode $node, string $exten, int $count): array
     {
-        if ($count < 1) {
+        return $this->missingPrioritiesOf($node, [$exten => $count])[$exten] ?? [];
+    }
+
+    /**
+     * missingPriorities() for several extens in one login: only the extens with missing priorities.
+     *
+     * @param  array<string, int>  $counts  exten (or a number a pattern matches) => its number of priorities
+     * @return array<string, list<int>>
+     */
+    public function missingPrioritiesOf(PbxNode $node, array $counts): array
+    {
+        $counts = array_filter($counts, fn (int $count): bool => $count > 0);
+
+        if ($counts === []) {
             return [];
         }
 
         $context = $this->entryContext($node);
 
-        return $this->session($node, fn (AmiClient $ami): array => array_values(array_filter(
-            range(1, $count),
-            fn (int $priority): bool => $ami->getvar("DIALPLAN_EXISTS({$context},{$exten},{$priority})") !== '1',
-        )));
+        return $this->session($node, function (AmiClient $ami) use ($counts, $context): array {
+            $missing = [];
+
+            foreach ($counts as $exten => $count) {
+                $priorities = array_values(array_filter(
+                    range(1, $count),
+                    fn (int $priority): bool => $ami->getvar("DIALPLAN_EXISTS({$context},{$exten},{$priority})") !== '1',
+                ));
+
+                if ($priorities !== []) {
+                    $missing[(string) $exten] = $priorities;
+                }
+            }
+
+            return $missing;
+        });
     }
 
     /**

@@ -114,7 +114,7 @@ _โทรข้าม tenant_ (สิทธิ์ต่อ extension ดู D7)
     - **ต้นทาง:** extension ผู้โทรมี calling profile ที่เปิด `cross_tenant` (D7) — tenant admin ของต้นทางกำหนด
     - **ปลายทาง:** tenant admin ของปลายทางตั้ง `tenants.cross_tenant_inbound` = `none` (default) / `all` / `selected` (+ ตาราง `tenant_inbound_allowlist` (tenant_id, source_tenant_id)) — กันไม่ให้ใครก็ได้โทรเข้ามา
 - ไดเรกทอรี: tenant ที่รับสายจาก A (`all` หรืออยู่ใน allowlist) แสดงให้ admin/ผู้ใช้ของ A เห็นพร้อมรหัส `8<code>`
-- compile ต่อ tenant ต้นทาง (target `calling:<code>`): ต่อปลายทางที่รับ A หนึ่งรายการ exten `_<src>8<dst>.` → 1 `Gosub(<src>p${CALLERID(num)},1)` + `GotoIf` ไม่มี flag `x` → `denied,1` (D7), 2 `Set(CALLERID(num)=8<src>${CALLERID(num)})` (ปลายทางเห็น `810171001` และกดกลับได้ถ้ามีสิทธิ์ย้อนกลับ), 3 `Goto(<dst>${EXTEN:9},1)`; และ `_<src>8.` → `Goto(denied,1)` (ปลายทางไม่รับ = ได้ยินประกาศ; pattern ที่ยาวกว่าชนะ)
+- compile ต่อ tenant ต้นทาง (target `calling:<code>`): pattern เดียว `_<src>8XXXX.` + marker `<src>x<dst>` ต่อปลายทางที่รับเรา — รายละเอียดใน §12 "D7" (แผนเดิม `_<src>8<dst>.` + `_<src>8.` ใช้ไม่ได้ เพราะ pbx_realtime ไม่เลือก pattern ที่ยาวที่สุด); ปลายทางเห็น `8<src><caller>` และกดกลับได้ถ้ามีสิทธิ์ย้อนกลับ
 - ปลายทางเปลี่ยนการรับสาย = recompile `calling:<code>` ของต้นทางที่ได้รับผล; ปลายทางถูก suspend = แถวของปลายทางเป็น `denied` อยู่แล้ว
 - MVP เฉพาะ tenant บน node เดียวกัน — ต่าง node ต้องมี trunk ระหว่าง node (Phase 4); tenant ต่าง node ไม่แสดงในไดเรกทอรี
 
@@ -181,11 +181,11 @@ _Compile_
     2. `GotoIf($[${REGEX("/<flag>/" ${GOSUB_RETVAL})}]?5)` — มีสิทธิ์ `allow` ข้ามไปโทรเลย (ข้าม tenant ไป `<dst>` ใช้ `"/(xa|x<dst>)/"`)
     3. `GotoIf($[${REGEX("/<FLAG>/" ${GOSUB_RETVAL})}]?:denied,1)` — ไม่ใช่ `code` = denied (ข้าม tenant ใช้ `"/(XA|X<dst>)/"`)
     4. `Gosub(<code>auth,1(<flag>))` — กลับมาเฉพาะเมื่อรหัสถูกและปลดหมวดนี้ได้ ไม่เช่นนั้นไป denied ใน subroutine
-    5… Dial ออก trunk (Phase 4) หรือ Goto ข้าม tenant (ต้องยืนยัน quoting ของ `REGEX` ใน `GotoIf` บน node lab)
+    5… Dial ออก trunk (Phase 4) หรือ Goto ข้าม tenant
 - priority 3–4 มีเฉพาะเมื่อ tenant มีรหัสอนุญาต active ที่ปลดหมวดนั้นได้ — ไม่มี = priority 3 เป็น `Goto(denied,1)` (ไม่ถามรหัสที่ไม่มีทางถูก)
 - fail closed: ผู้โทรไม่มีแถวสิทธิ์ → `Gosub` ล้ม = วางสาย; ยังไม่มี trunk = หมวดโทรออกเป็น `Goto(denied,1)` ตั้งแต่ priority 1 (ไม่ถามรหัส)
 - กด `p1001` ผ่าน URI ได้แถว `<code>p1001` ซึ่งแค่ `Return` → ไม่มีผล (ถ้าต้องการ: priority 1 ตรวจว่าถูกเรียกผ่าน Gosub)
-- แก้ profile (หมวด หรือรายการ tenant ปลายทาง) = recompile extension ทุกตัวที่ใช้ profile นั้น (ทีละ revision ต่อ node ตามเดิม); ปลายทางเลิกรับเรา = recompile `calling:<code>` ของเรา (แถวไป tenant นั้นหายไป → `_<code>8.` → denied) โดย profile ยังจำรายการไว้
+- แก้ profile (หมวด หรือรายการ tenant ปลายทาง) = recompile extension ทุกตัวที่ใช้ profile นั้น (ทีละ revision ต่อ node ตามเดิม); ปลายทางเลิกรับเรา = recompile `calling:<code>` ของเรา (marker `<code>x<dst>` หายไป → denied) โดย profile ยังจำรายการไว้
 
 _รหัสอนุญาต (overrule ด้วยรหัสผ่าน — ตัดสินใจ 29 ต.ค. 2026)_
 
@@ -194,12 +194,12 @@ _รหัสอนุญาต (overrule ด้วยรหัสผ่าน �
 - `authorization_codes` (tenant_id, label เช่น ชื่อเจ้าของ, `user_id` nullable, categories jsonb = รายการหมวดที่ปลดได้ (`x l m f h i p`), `node_hash`, status `active`/`disabled`, `expires_at` nullable, `version`) — ข้าม tenant ที่ปลดด้วยรหัส = ไปได้ทุก tenant ที่อยู่ในขอบเขตของ profile ผู้โทรและรับเรา (รหัสไม่ขยายขอบเขต)
 - รหัส 6–12 หลัก unique ต่อ tenant; ระบบสุ่มให้ (default 8 หลัก) หรือ admin กำหนดเอง; **แสดงครั้งเดียว** เหมือนรหัส SIP — แอปไม่เก็บรหัสจริง เก็บแค่ `node_hash` = `md5(<tenants.auth_salt><รหัส>)` (salt สุ่มต่อ tenant ตอนสร้าง) ซึ่งพอสำหรับ compile และตรวจซ้ำ; ลืมรหัส = reset (ได้รหัสใหม่)
 - compile อยู่ใน target `calling:<code>` (เพราะ priority 3–4 ของหมวดขึ้นกับว่ามีรหัสที่ปลดหมวดนั้นหรือไม่):
-    - ต่อรหัส active ที่ยังไม่หมดอายุ: exten `<code>a<node_hash>` → 1 `Return(<id>/<flags>/)` เช่น `Return(17/l/m/x/)` — exten ยาว 4+1+32 = 37 ตัวอักษร (ต้องยืนยันความกว้าง `extensions.exten` บน node ≥ 40)
+    - ต่อรหัส active ที่ยังไม่หมดอายุ: exten `<code>a<node_hash>` → 1 `Return(<id>/<flags>/)` เช่น `Return(17/l/m/x/)` — exten ยาว 4+1+32 = 37 ตัวอักษร (`extensions.exten` บน node กว้าง 40)
     - subroutine `<code>auth` (ARG1 = flag ที่ต้องการ):
         1. `Set(TRIES=0)`
         2. `Read(AUTHCODE,agent-pass,12,,1,8)`
         3. `Set(H=<code>a${MD5(<salt>${AUTHCODE})})`
-        4. `GotoIf($[${DIALPLAN_EXISTS(managed,${H},1)}]?:8)`
+        4. `GotoIf($[${DIALPLAN_EXISTS(${CONTEXT},${H},1)}]?:8)`
         5. `Gosub(${H},1)`
         6. `GotoIf($[${REGEX("/${ARG1}/" ${GOSUB_RETVAL})}]?:8)`
         7. `Set(CDR(userfield)=authcode:${CUT(GOSUB_RETVAL,/,1)})` แล้ว `Return()` (priority 7.1) — CDR (Phase 3) บอกได้ว่าใช้รหัสของใคร
@@ -229,7 +229,7 @@ _Trunk PSTN (Phase 4 — มีทั้งสองแบบ)_
 _API v1_ (ตามแบบ API v1 เดิม: token ผูก tenant, ทำในนาม user ด้วย role ณ ตอนนั้น — การเขียนต้องเป็น owner/admin และ token `read+write`; POST ใช้ Idempotency-Key; PATCH ใช้ `version`/`If-Match`; การเปลี่ยนที่ไปถึง PBX ตอบ `202` + `operation_id` (หลาย extension = หลาย operation → ตอบ `operation_ids`); audit ทุกครั้ง)
 
 - `GET|POST calling-profiles`, `GET|PATCH|DELETE calling-profiles/{id}` — `categories` เป็น object ชื่อหมวด → ระดับ (`allow`/`code`/`deny`) เช่น `{"cross_tenant": "allow", "mobile": "code", "international": "deny"}` ชื่อหมวด (`cross_tenant`, `landline`, `mobile`, `toll_free`, `hotline`, `international`, `premium`) ไม่ใช่ flag ตัวอักษร; `cross_tenant_scope: {"scope": "all"|"selected", "tenants": ["1042", "1050"]}`; ลบ profile ที่ยังมี extension ใช้ = 409; ตั้ง `is_default` ได้ทีละ profile
-- `GET|POST authorization-codes`, `GET|PATCH|DELETE authorization-codes/{id}`, `POST authorization-codes/{id}/reset` — `categories` เป็นรายชื่อหมวด; POST/reset คืน `code` **ครั้งเดียว** (ไม่ส่ง `code` = ระบบสุ่ม 8 หลัก); GET ไม่มีรหัส; รหัสซ้ำกับที่มีอยู่ = 422; ทุกการเปลี่ยน = `202` + `operation_id` ของ `calling:<code>`
+- `GET|POST authorization-codes`, `GET|PATCH|DELETE authorization-codes/{id}`, `POST authorization-codes/{id}/reset` — `categories` เป็นรายชื่อหมวด; POST/reset คืนรหัสใน `authorization_code` **ครั้งเดียว** (POST ไม่ส่ง `code` = ระบบสุ่ม 8 หลัก); GET ไม่มีรหัส; รหัสซ้ำกับที่มีอยู่ = 422; ทุกการเปลี่ยน = `202` + `operation_id` ของ `calling:<code>`
 - `GET|POST trunks`, `GET|PATCH|DELETE trunks/{id}` (Phase 4) — เฉพาะ trunk ของ tenant; trunk กลางแสดงใน `GET outbound-routes` แบบไม่มี credential; `PATCH outbound-routes` เรียงลำดับ trunk
 - `PATCH extensions/{id}` รับ `calling_profile_id`; `GET extensions` คืน `calling_profile` และกรองด้วย `calling_profile_id` ได้
 - `GET|PATCH cross-tenant` — การรับสายข้าม tenant ของ tenant นี้: `inbound` (`none`/`all`/`selected`) + `allowed_tenants` (รายการ `tenant_code`)
@@ -242,7 +242,7 @@ _ตกลงแล้ว (29 ต.ค. 2026):_ สิทธิ์ผ่าน ca
 
 _ลำดับงาน D7 และเกณฑ์ผ่าน (node lab)_ — หมวดโทรออก PSTN/มือถือ/ต่างประเทศ ทดสอบจริงได้เมื่อมี trunk (Phase 4); รอบนี้ทดสอบผ่านหมวดข้าม tenant
 
-1. ยืนยันบน node lab ด้วยแถวที่เขียนมือ: quoting ของ `REGEX` ใน `GotoIf`, `DIALPLAN_EXISTS` กับ exten ที่คำนวณ, `Gosub` ไป exten ที่ได้จาก `MD5()`, ความกว้าง `extensions.exten`, `CDR(userfield)` ติดไปกับ CDR ของผู้โทร, มี `agent-pass`/`auth-incorrect`
+1. ~~ยืนยันบน node lab ด้วยแถวที่เขียนมือ~~ — ผ่านแล้ว (29 ต.ค. 2026, Asterisk 22.11, tenant code ทดสอบ `0999` ลบแล้ว): `REGEX("/(xa|x1042)/" ${GOSUB_RETVAL})` ใน `Set`/`GotoIf` ของ realtime ใช้ได้ (`|` ไม่ถูกแปลง, ตัวพิมพ์ใหญ่/เล็กแยกกัน), `GotoIf(...?<priority>:denied,1)`, `Gosub` ไป exten ที่คำนวณ (`0999p${CALLERID(num)}`, `${H}`), `Read` + `MD5()` + `DIALPLAN_EXISTS`, ผิด 3 ครั้ง = `denied` (Hangup 21), รหัสถูก = CDR ของผู้โทรมี `userfield = authcode:17`; `extensions.exten` กว้าง 40, `cdr.userfield` 256, มี `agent-pass`/`auth-incorrect` — **`DIALPLAN_EXISTS` ต้องใช้ `${CONTEXT}` (= `from-opensips`) ไม่ใช่ `managed`** เพราะแถว realtime ทำงานใน context `from-opensips` ผ่าน switch; วิธีทดสอบ: `channel originate Local/<exten>@from-opensips/n extension <dtmf-exten>@from-opensips` โดยอีกขาทำ `SendDTMF`, ผลเขียนลง astdb (`Set(DB(...))`)
 2. migration + models + factories: `calling_profiles`, `calling_profile_destinations`, `authorization_codes`, `tenants.cross_tenant_inbound` + `tenant_inbound_allowlist`, `tenants.auth_salt`, `extensions.calling_profile_id`; profile เริ่มต้นใน `CreateTenant`
 3. compiler: `<code>p<ext>` ใน `number:`, target ใหม่ `calling:<code>` (หมวด + `<code>auth` + `<code>a<hash>`) ใน `NumberCompiler`/adapter/read-back + tests
 4. actions + API + audit (profiles, codes, cross-tenant, directory) + tests
@@ -633,6 +633,19 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - migration แก้ไฟล์เดิม (เริ่มใหม่ — `migrate:fresh`)
 - **บทเรียนจาก node lab (22 ต.ค.):** เมื่อโหลด `domain` module แล้ว `is_myself()` เป็นจริงกับทุกโดเมนในตาราง `domain` ด้วย — cfg แรกตรวจ `is_myself` ก่อน โทรศัพท์ทุก tenant จึงได้ `403 Domain has no tenant`; แก้เป็นตรวจ `is_domain_local` ก่อน และอ่าน code ด้วย `sql_select_one`; วิธีหาสาเหตุ: ใส่ค่าตัวแปรใน reason ของ 403 ชั่วคราว แล้วส่ง INVITE ทดสอบ (ก่อน auth ไม่นับ fail2ban)
 
+### D7 — สิทธิ์การโทร + รหัสอนุญาต + โทรข้าม tenant (29 ต.ค. 2026, ยังไม่ commit)
+
+- **ข้อมูล** (migration ใหม่ ไม่ต้อง `migrate:fresh`): `calling_profiles` (categories = map หมวด → `allow`/`code`, ไม่มี = `deny`), `calling_profile_destinations`, `authorization_codes` (เก็บแค่ `node_hash`), `tenants.cross_tenant_inbound` + `auth_salt` (เติมให้ tenant เดิมใน migration), `tenant_inbound_allowlist`, `extensions.calling_profile_id` (null = default); `CreateTenant` สร้าง 5 profile เริ่มต้น ("Internal only" เป็น default)
+- **Compile:** `NumberCompiler` เขียน `<code>p<ext>` → `Return(<flags>)` ใน `number:` (extension ที่ปิด = ไม่มีแถว → `Gosub` ล้ม = โทรนอก tenant ไม่ได้); `CallingCompiler` → target `calling:<code>` เป็นเจ้าของ exten ที่ขึ้นต้น `_<code>`, `<code>a`, `<code>x` ทั้งหมด (`RealtimeAdapter::replaceExtensStartingWith`, เทียบด้วย `substr` ไม่ใช่ `LIKE` เพราะ `_`); tenant suspended / ไม่อยู่บน node = ลบทั้งหมด; AMI ตรวจ pattern ด้วยเลขตัวอย่างที่ match (`CompiledCalling::probeNumber`)
+- **เปลี่ยนจากแผนเดิม (โทรข้าม tenant):** ไม่ใช้ `_<src>8<dst>.` ต่อปลายทาง + `_<src>8.` → denied เพราะ pbx_realtime เลือก pattern แรกที่ DB คืน (เรียงตาม exten: `_10208.` มาก่อน `_102081042.`) ไม่ใช่ pattern ที่ยาวที่สุด — ใช้ pattern เดียว `_<src>8XXXX.` + exten marker `<src>x<dst>` (`NoOp`) ต่อปลายทางที่รับเรา: ตรวจเลขเป็นตัวเลข → marker และเบอร์ปลายทางมีอยู่ (`DIALPLAN_EXISTS(${CONTEXT},…)`) → flag `xa`/`x<dst>` หรือ `XA`/`X<dst>` + `Gosub(<src>auth,1(x))` → `CALLERID(num)=8<src><caller>` → `Goto(${EXTEN:5},1)`; ทุกการตรวจ "ผ่านแล้วกระโดดไปข้างหน้า ไม่ผ่านตกไป denied" (expression ผิดพลาด = ปฏิเสธ); pattern ของ tenant เดียวกันห้ามซ้อนกัน; marker ไม่ขึ้นกับ node (ปลายทางต่าง node ไม่มีเบอร์บน node นี้ → denied)
+- **รหัสอนุญาต:** ตาม _รหัสอนุญาต_ ข้างบน; หมดอายุด้วย `authorization-codes:expire` ทุกนาที (status `expired` + recompile); API คืนรหัสใน `authorization_code` (ไม่ใช่ `code`) เพื่อให้ `Audit::redact` ซ่อนใน Idempotency-Key replay
+- **สิ่งที่ recompile:** แก้ profile → extension ที่ใช้ (default → รวมที่ไม่มี profile); เปลี่ยน default → extension ที่ไม่มี profile; รหัสเปลี่ยน → `calling:` ของ tenant; ปลายทางเปลี่ยนการรับ → `calling:` ของต้นทางที่ได้/เสียปลายทางนี้; assign / suspend / unassign / reapply domain → `calling:` ด้วย
+- **หน้าเว็บ:** "Calling permissions" (`/t/{slug}/calling`): ตาราง profile × หมวด, แก้ไขในหน้า, รหัสอนุญาต (แสดงครั้งเดียว), การรับสายข้าม tenant, ไดเรกทอรี; หน้า Extensions มีคอลัมน์ Calling เลือก profile
+- **API v1:** `calling-profiles` (+ `{id}/default`), `authorization-codes` (+ `{id}/reset`), `GET|PATCH cross-tenant`, `GET directory`, `PATCH extensions/{id}` รับ `calling_profile_id`, `GET extensions?calling_profile_id=`
+- **ทดสอบบน node lab** (แถวจาก `CallingCompiler` จริง, tenant ทดสอบ `0999`/`0998`/`0997`, ลบแล้ว): `/xa/` → ถึงปลายทางและเห็น `80999201`; `/` → denied; ปลายทางไม่รับ → denied; `/x0998/` → ถึง; `/x1042/` → denied; `/XA/` + รหัสถูก → ถึง, CDR `userfield = authcode:17`; `/XA/` + รหัสผิด 3 ครั้ง → denied (Hangup 21)
+- 254 tests, Larastan, vue-tsc, lint, build ผ่าน
+- ยังไม่ได้: ทดสอบด้วยโทรศัพท์จริงระหว่าง 2 tenant; หมวดโทรออก (รอ trunk, Phase 4); นับ `AuthCodeFailed` (Phase 3); `emergency_numbers`
+
 ### ถัดไป
 
-ตั้ง `SIP_TENANT_DOMAIN_SUFFIX` + wildcard DNS → reinstall OpenSIPS/Asterisk บน node lab (`opensips -C`) → `migrate:fresh` + สร้าง tenant ใหม่ 2 ราย → ทดสอบด้วยโทรศัพท์ (เลขซ้ำกันสองโดเมน, โทรภายใน, ข้ามโดเมนตรงถูกปฏิเสธ, voicemail/`*97`/`*43`, ปิด extension) → ทดสอบ PAI ปลอม → D7 (calling profiles 3 ระดับ, รหัสอนุญาต, โทรข้าม tenant — ลำดับงานใน D7) → หน้า Operations
+`php artisan migrate` → ทดสอบ D7 ด้วยโทรศัพท์ 2 tenant (profile ภายใน/ข้าม tenant/ด้วยรหัส, ปลายทางรับ/ไม่รับ) → หน้า Operations

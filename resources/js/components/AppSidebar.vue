@@ -5,6 +5,7 @@ import {
     KeyRound,
     Phone,
     PhoneForwarded,
+    PhoneOutgoing,
     LayoutGrid,
     ScrollText,
     Server,
@@ -30,6 +31,7 @@ import { index as adminTenants } from '@/routes/admin/tenants';
 import { dashboard as tenantDashboard } from '@/routes/tenant';
 import { index as apiTokens } from '@/routes/tenant/api-tokens';
 import { index as auditLog } from '@/routes/tenant/audit-log';
+import { index as calling } from '@/routes/tenant/calling';
 import { index as extensions } from '@/routes/tenant/extensions';
 import { index as ringGroups } from '@/routes/tenant/ring-groups';
 import { index as members } from '@/routes/tenant/members';
@@ -78,6 +80,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
             title: 'Ring groups',
             href: ringGroups({ tenant: tenant.slug }),
             icon: PhoneForwarded,
+        },
+        {
+            title: 'Calling permissions',
+            href: calling({ tenant: tenant.slug }),
+            icon: PhoneOutgoing,
         },
         ...(tenant.canManageMembers
             ? [

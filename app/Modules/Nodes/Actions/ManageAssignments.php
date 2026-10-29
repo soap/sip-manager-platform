@@ -42,6 +42,7 @@ class ManageAssignments
 
             $assignment = TenantPbxAssignment::query()->create(['tenant_id' => $tenant->id, 'pbx_node_id' => $node->id]);
             $this->provisionDomain($assignment, OperationType::TenantAssigned);
+            $this->provisionCalling($assignment, OperationType::TenantAssigned);
 
             $this->audit->record('pbx.assigned', $assignment, ['node' => $node->name, 'code' => $tenant->code, 'sip_domain' => $tenant->sip_domain], $tenant);
 
@@ -75,6 +76,8 @@ class ManageAssignments
                     RingGroup::MORPH,
                     $group->id,
                 ));
+
+                $this->provisionCalling($assignment, OperationType::AssignmentChanged);
             }
         });
 
@@ -93,19 +96,27 @@ class ManageAssignments
 
         DB::transaction(function () use ($assignment): void {
             $assignment->delete();
-            // compiled after the delete, so the domain row goes away
+            // compiled after the delete, so the domain row and the calling dialplan go away
             $this->provisionDomain($assignment, OperationType::TenantUnassigned);
+            $this->provisionCalling($assignment, OperationType::TenantUnassigned);
         });
 
         $this->audit->record('pbx.unassigned', $assignment, ['node' => $assignment->node->name, 'sip_domain' => $assignment->tenant->sip_domain], $assignment->tenant);
     }
 
     /**
-     * Writes the domain again, e.g. after a failed operation or a reinstall of the node.
+     * Writes the domain and the calling dialplan again, e.g. after a failed operation or a
+     * reinstall of the node.
+     *
+     * @return ProvisioningOperation the domain's
      */
     public function reapplyDomain(TenantPbxAssignment $assignment): ProvisioningOperation
     {
-        return DB::transaction(fn (): ProvisioningOperation => $this->provisionDomain($assignment, OperationType::Reapplied));
+        return DB::transaction(function () use ($assignment): ProvisioningOperation {
+            $this->provisionCalling($assignment, OperationType::Reapplied);
+
+            return $this->provisionDomain($assignment, OperationType::Reapplied);
+        });
     }
 
     /**
@@ -119,6 +130,20 @@ class ManageAssignments
     private function provisionDomain(TenantPbxAssignment $assignment, OperationType $type): ProvisioningOperation
     {
         return $this->provisioning->forDomain(
+            $assignment->pbx_node_id,
+            $assignment->tenant_id,
+            $type,
+            TenantPbxAssignment::MORPH,
+            $assignment->id,
+        );
+    }
+
+    /**
+     * The tenant's calling dialplan (plan D7): calls to other tenants, codes, outbound categories.
+     */
+    private function provisionCalling(TenantPbxAssignment $assignment, OperationType $type): ProvisioningOperation
+    {
+        return $this->provisioning->forCalling(
             $assignment->pbx_node_id,
             $assignment->tenant_id,
             $type,

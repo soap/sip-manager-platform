@@ -12,10 +12,10 @@ use Illuminate\Support\Facades\DB;
 use LogicException;
 
 /**
- * Step 1 of the pipeline (plan v0.2 §6.1): records that a number or a SIP domain on a node must be
- * written again — a draft revision, a pending operation and an outbox message — in the caller's
- * transaction, so the change and the request to apply it commit or roll back together. The outbox
- * relay then hands the revision to the apply job.
+ * Step 1 of the pipeline (plan v0.2 §6.1): records that a number, a SIP domain or a calling
+ * dialplan on a node must be written again — a draft revision, a pending operation and an outbox
+ * message — in the caller's transaction, so the change and the request to apply it commit or
+ * roll back together. The outbox relay then hands the revision to the apply job.
  */
 class RequestProvisioning
 {
@@ -46,6 +46,16 @@ class RequestProvisioning
     public function forDomain(int $nodeId, string $tenantId, OperationType $type, string $aggregateType, int $aggregateId): ProvisioningOperation
     {
         return $this->request($nodeId, $tenantId, ConfigRevision::domainTarget($this->tenantCode($tenantId)), $type, $aggregateType, $aggregateId);
+    }
+
+    /**
+     * The tenant's calling dialplan on its node (plan D7).
+     *
+     * @throws LogicException when called outside a database transaction
+     */
+    public function forCalling(int $nodeId, string $tenantId, OperationType $type, string $aggregateType, int $aggregateId, ?string $idempotencyKey = null): ProvisioningOperation
+    {
+        return $this->request($nodeId, $tenantId, ConfigRevision::callingTarget($this->tenantCode($tenantId)), $type, $aggregateType, $aggregateId, $idempotencyKey);
     }
 
     private function tenantCode(string $tenantId): string

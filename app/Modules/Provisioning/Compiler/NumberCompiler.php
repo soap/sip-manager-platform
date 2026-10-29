@@ -34,6 +34,10 @@ use App\Modules\Tenancy\Models\Tenant;
  * busy call is left there (VoiceMail ... b or u) before Hangup(). Phones reach their own box with
  * *97, which reaches Asterisk as 1042*97.
  *
+ * An active extension also gets the permission exten 1042p101 (plan D7): Return() with the flags
+ * of its calling profile, which CallingCompiler's dialplan asks for with Gosub. Without that row
+ * the Gosub fails and the call ends, so a disabled extension calls nowhere outside the tenant.
+ *
  * Anything disabled, or of a suspended tenant or assignment, loses its box and sends every caller
  * to denied. A disabled extension keeps its subscriber with ha1 "disabled", which OpenSIPS refuses
  * with a plain 403 instead of a failed authentication, so the phone's retries cannot get the
@@ -177,7 +181,25 @@ class NumberCompiler
             'mailbox' => $number,
             'password' => (string) $extension->voicemail_pin,
             'fullname' => $extension->display_name,
-        ] : null, $credential->sip_username, $tenant->sip_domain, self::voicemailContext($tenant));
+        ] : null, $credential->sip_username, $tenant->sip_domain, self::voicemailContext($tenant), [
+            ['priority' => 1, 'app' => 'Return', 'appdata' => $this->permissionFlags($extension)],
+        ]);
+    }
+
+    /**
+     * The flags of the extension's calling profile (plan D7), e.g. "/l/M/xa/"; "/" without a profile.
+     *
+     * @throws ProvisioningRejected when too many selected tenants do not fit in one row
+     */
+    private function permissionFlags(Extension $extension): string
+    {
+        $flags = $extension->effectiveCallingProfile()?->flags() ?? '/';
+
+        if (strlen($flags) > self::MAX_APPDATA) {
+            throw ProvisioningRejected::because('dialplan_too_long', "The calling profile of {$extension->extension_number} lists too many tenants for one dialplan row.");
+        }
+
+        return $flags;
     }
 
     private function mailboxOf(Tenant $tenant, Extension $extension): string
@@ -284,7 +306,10 @@ class NumberCompiler
         ], null, $username, $tenant->sip_domain, self::voicemailContext($tenant));
     }
 
-    private function inService(Tenant $tenant, PbxNode $node): bool
+    /**
+     * Whether the node serves the tenant now: tenant and assignment active, on this node.
+     */
+    public function inService(Tenant $tenant, PbxNode $node): bool
     {
         $assignment = TenantPbxAssignment::query()->where('tenant_id', $tenant->id)->first();
 
