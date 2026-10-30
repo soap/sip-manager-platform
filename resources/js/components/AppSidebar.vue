@@ -7,6 +7,7 @@ import {
     PhoneForwarded,
     PhoneOutgoing,
     LayoutGrid,
+    History,
     ListChecks,
     ScrollText,
     Server,
@@ -34,6 +35,7 @@ import { dashboard as tenantDashboard } from '@/routes/tenant';
 import { index as apiTokens } from '@/routes/tenant/api-tokens';
 import { index as auditLog } from '@/routes/tenant/audit-log';
 import { index as calling } from '@/routes/tenant/calling';
+import { index as calls } from '@/routes/tenant/calls';
 import { index as extensions } from '@/routes/tenant/extensions';
 import { index as ringGroups } from '@/routes/tenant/ring-groups';
 import { index as members } from '@/routes/tenant/members';
@@ -93,6 +95,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
             title: 'Calling permissions',
             href: calling({ tenant: tenant.slug }),
             icon: PhoneOutgoing,
+        },
+        {
+            title: 'Call history',
+            href: calls({ tenant: tenant.slug }),
+            icon: History,
         },
         {
             title: 'Operations',

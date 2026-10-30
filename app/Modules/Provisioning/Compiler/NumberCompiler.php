@@ -48,7 +48,10 @@ class NumberCompiler
     /** Seconds a phone rings before the call gives up. */
     public const RING_SECONDS = 30;
 
-    /** Shared by every tenant: where refused calls go. */
+    /**
+     * Shared by every tenant: where refused calls went before each tenant got its own
+     * (deniedExten()); kept for rows that may still go there.
+     */
     public const DENIED_EXTEN = 'denied';
 
     /** The feature code for one's own mailbox, as the phone dials it. */
@@ -117,7 +120,17 @@ class NumberCompiler
     }
 
     /**
-     * The shared exten refused calls go to: "not in service", then hang up with cause 21 (rejected).
+     * The tenant's own exten for refused calls (CallingCompiler writes it), e.g. 1042denied: the
+     * call ends there, so the CDR's dst starts with the tenant code.
+     */
+    public static function deniedExten(string $tenantCode): string
+    {
+        return $tenantCode.self::DENIED_EXTEN;
+    }
+
+    /**
+     * Where refused calls go: "not in service", then hang up with cause 21 (rejected). The rows of
+     * the shared exten and of each tenant's own one.
      *
      * @return list<array{priority: int, app: string, appdata: string}>
      */
@@ -302,7 +315,7 @@ class NumberCompiler
             'ha1' => self::DISABLED_HA1,
             'ha1_sha256' => self::DISABLED_HA1,
         ], [
-            ['priority' => 1, 'app' => 'Goto', 'appdata' => self::DENIED_EXTEN.',1'],
+            ['priority' => 1, 'app' => 'Goto', 'appdata' => self::deniedExten($tenant->code).',1'],
         ], null, $username, $tenant->sip_domain, self::voicemailContext($tenant));
     }
 

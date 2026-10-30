@@ -14,3 +14,4 @@ require __DIR__.'/tenancy.php';
 require __DIR__.'/nodes.php';
 require __DIR__.'/telephony.php';
 require __DIR__.'/provisioning.php';
+require __DIR__.'/call-records.php';

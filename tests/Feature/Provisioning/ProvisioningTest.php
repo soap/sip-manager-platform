@@ -8,6 +8,7 @@ use App\Modules\Infrastructure\Asterisk\Exceptions\AmiUnavailable;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Provisioning\Actions\ApplyRevision;
 use App\Modules\Provisioning\Actions\RequestProvisioning;
+use App\Modules\Provisioning\Compiler\NumberCompiler;
 use App\Modules\Provisioning\Enums\OperationStatus;
 use App\Modules\Provisioning\Enums\OperationType;
 use App\Modules\Provisioning\Enums\RevisionStatus;
@@ -136,7 +137,7 @@ it('takes a disabled extension out of service and a deleted one off the node', f
 
     // the subscriber stays as a disabled account, which OpenSIPS refuses without a failed authentication for fail2ban
     expect($node->subscribers["201@{$tenant->sip_domain}"])->toMatchArray(['username' => '201', 'ha1' => 'disabled', 'ha1_sha256' => 'disabled'])
-        ->and($node->extens['1020201'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+        ->and($node->extens['1020201'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => '1020denied,1']]);
 
     $this->delete(route('tenant.extensions.destroy', [$tenant, $extension->id]));
     applyPendingRevisions();
@@ -176,8 +177,11 @@ it('suspends and resumes every number of a tenant with its assignment', function
     expect(ProvisioningOperation::query()->where('type', OperationType::AssignmentChanged)->count())->toBe(3)
         ->and(array_unique(array_column($node->subscribers, 'ha1')))->toBe(['disabled']);
     foreach ($numbers as $number) {
-        expect($node->extens["1020{$number}"])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+        expect($node->extens["1020{$number}"])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => '1020denied,1']]);
     }
+    // where they go stays; the rest of the calling dialplan does not
+    expect($node->extens['1020denied'])->toBe(app(NumberCompiler::class)->denied())
+        ->and($node->extens)->not->toHaveKey('_10208XXXX.');
 
     $this->patch(route('admin.assignments.update', $assignment), ['status' => 'active']);
     applyPendingRevisions();
@@ -433,7 +437,7 @@ it('sends callers of a disabled ring group to denied', function () {
     ])->assertSessionHasNoErrors();
     applyPendingRevisions();
 
-    expect($node->extens['1020500'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']]);
+    expect($node->extens['1020500'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => '1020denied,1']]);
 });
 
 it('refuses a node that still serves one shared SIP domain', function () {

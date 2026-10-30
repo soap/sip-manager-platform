@@ -3,6 +3,7 @@
 namespace App\Modules\Provisioning\Compiler;
 
 use App\Modules\Nodes\Models\PbxNode;
+use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Enums\AuthorizationCodeStatus;
 use App\Modules\Telephony\Enums\CallCategory;
 use App\Modules\Telephony\Models\AuthorizationCode;
@@ -15,24 +16,28 @@ use Illuminate\Database\Eloquent\Collection;
  * own numbers, as it is now. The tenant with code 1042 gets:
  *
  * - _10428XXXX. for 8 + another tenant's code + a number. Every check jumps ahead when it passes
- *   and falls through to denied, so an expression Asterisk cannot evaluate refuses the call:
+ *   and falls through to 1042denied, so an expression Asterisk cannot evaluate refuses the call:
  *   the number is digits; the destination takes our calls (its marker exten 1042x<dst> exists)
  *   and has the number; the caller's permission exten 1042p<caller> (NumberCompiler) returns
  *   "xa" or "x<dst>", or "XA"/"X<dst>" and the caller enters a code that unlocks other tenants.
  *   The callee then sees 81042<caller>, which it can dial back.
  * - 1042x<dst> for each tenant that takes calls from 1042: NoOp(), only looked for.
- * - _1042<pattern> for each category that leaves the platform: denied until there are trunks
+ * - _1042<pattern> for each category that leaves the platform: 1042denied until there are trunks
  *   (Phase 4), without asking for a code.
  * - 1042auth, the subroutine that asks for a code (ARG1 = the category's flag), and 1042a<hash>
  *   for each usable authorization code: Return(<id>/<flags>/). The subroutine looks for the exten
- *   of the md5 of the tenant's salt and the digits entered; three wrong tries end at denied. A
+ *   of the md5 of the tenant's salt and the digits entered; three wrong tries end at 1042denied. A
  *   right one puts "authcode:<id>" in the CDR's userfield.
  *
  * Realtime rows run in the entry context (from-opensips) through its switch, so the dialplan looks
  * for extens with DIALPLAN_EXISTS(${CONTEXT},…). pbx_realtime takes the first pattern that matches,
  * not the most specific, so no two patterns of a tenant may overlap.
  *
- * A tenant that is suspended or not served by the node has no calling dialplan there.
+ * - 1042denied, where the tenant's refused calls go, also from its disabled numbers: the call
+ *   ends there, so the CDR's dst names the tenant (plan §7).
+ *
+ * A suspended tenant keeps only 1042denied on its node, for its numbers that now refuse every
+ * call; a tenant not served by the node has no calling dialplan there.
  */
 class CallingCompiler
 {
@@ -48,12 +53,20 @@ class CallingCompiler
     {
         $tenant = Tenant::query()->where('code', $tenantCode)->first();
 
-        if ($tenant === null || ! $this->numbers->inService($tenant, $node)) {
+        if ($tenant === null) {
             return new CompiledCalling($tenantCode, 'removed', []);
         }
 
+        if (! $this->numbers->inService($tenant, $node)) {
+            $assigned = TenantPbxAssignment::query()->where('tenant_id', $tenant->id)->where('pbx_node_id', $node->id)->exists();
+
+            return $assigned
+                ? new CompiledCalling($tenantCode, 'suspended', [NumberCompiler::deniedExten($tenantCode) => $this->numbers->denied()])
+                : new CompiledCalling($tenantCode, 'removed', []);
+        }
+
         $codes = self::usableCodes($tenant)->orderBy('id')->get();
-        $extens = [];
+        $extens = [NumberCompiler::deniedExten($tenant->code) => $this->numbers->denied()];
         $codeExtens = [];
 
         if ($codes->isNotEmpty()) {
@@ -73,7 +86,7 @@ class CallingCompiler
         foreach (CallCategory::cases() as $category) {
             $extens['_'.$tenant->code.$category->pattern()] = $this->numbered($category === CallCategory::CrossTenant
                 ? $this->crossTenant($tenant, $this->anyCodeUnlocks($codes, $category))
-                : [['Goto', NumberCompiler::DENIED_EXTEN.',1']]);
+                : [['Goto', NumberCompiler::deniedExten($tenant->code).',1']]);
         }
 
         return new CompiledCalling($tenant->code, 'active', $extens, $codeExtens, $tenant->auth_salt);
@@ -115,7 +128,7 @@ class CallingCompiler
         $flag = CallCategory::CrossTenant->flag();
         $upper = strtoupper($flag);
         $destination = '${EXTEN:5:4}';
-        $denied = ['Goto', NumberCompiler::DENIED_EXTEN.',1'];
+        $denied = ['Goto', NumberCompiler::deniedExten($tenant->code).',1'];
 
         $checks = [
             ['GotoIf', '$[${REGEX("^[0-9]+$" ${EXTEN:9})}]?3'],
@@ -163,7 +176,7 @@ class CallingCompiler
             ['Set', 'TRIES=$[${TRIES} + 1]'],
             ['Playback', 'auth-incorrect'],
             ['GotoIf', '$[${TRIES} < '.self::CODE_ATTEMPTS.']?2'],
-            ['Goto', NumberCompiler::DENIED_EXTEN.',1'],
+            ['Goto', NumberCompiler::deniedExten($tenant->code).',1'],
             ['Set', 'CDR(userfield)=authcode:${CUT(GOSUB_RETVAL,/,1)}'],
             ['Return', ''],
         ];

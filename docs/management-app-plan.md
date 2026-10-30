@@ -476,13 +476,13 @@ API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/
 หน้าจอ (Inertia/Vue) — ✅ = มีแล้ว:
 
 - **Platform admin**: ✅ Nodes (`/admin/nodes`: sync, สถานะ endpoint, ทดสอบการเชื่อมต่อ, assign tenant), ✅ Tenants (`/admin/tenants`), ✅ Operations (`/admin/operations`: ทั้งระบบ, retry), ✅ Drift report (ในการ์ดของแต่ละ node ที่ `/admin/nodes` + ปุ่ม Reconcile now)
-- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens, Operations (`/t/{slug}/operations`); ⏳ Devices, Call history (CDR)
+- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens, Operations (`/t/{slug}/operations`); Call history (`/t/{slug}/calls`); ⏳ Devices
 
 ---
 
 ## 9. ลำดับงาน (milestones + เกณฑ์ผ่าน)
 
-สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ (reinstall จริงจาก SIP Deployer ผ่าน, โทรได้), M7 ยังไม่เริ่ม — รายละเอียดใน §12
+สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ (reinstall จริงจาก SIP Deployer ผ่าน, โทรได้), M7 กำลังทำ (CDR sync ✅ ในโค้ด, AMI listener ยังไม่เริ่ม) — รายละเอียดใน §12
 
 | #      | งาน                                                                                                                                                                                                       | เกณฑ์ผ่าน                                                                                                                                                            |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -688,6 +688,15 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - node lab (report-only, 29 ต.ค.): 8 targets ตรงหมด; unexpected 7 = exten เก่าจากรูปแบบเลข D1 (`20101`, `20102`, `20103`, `20500`, `30101`, `30102`) และ `*97` ร่วมเดิม — ลบมือได้เมื่อแน่ใจ
 - ยังไม่ทำ: เทียบ mailbox ที่ไม่มีเจ้าของ (unexpected voicemail rows)
 
+### M7 (ส่วนแรก) — CDR sync (29 ต.ค. 2026)
+
+- ตาราง `cdr` บน node (Alembic) ไม่มี primary key/index → อ่านตามช่วงเวลา `end`: `cdr_cursors.synced_until` ต่อ node, อ่านย้อน 5 นาที (`LAG_MINUTES`) แล้ว upsert ด้วย (node, `uniqueid`, `sequence`); sync แรกเริ่มจากแถวเก่าสุด ทีละช่วง 6 ชม. สูงสุด 40 ช่วงต่อรอบ; เวลาใน `cdr` เป็นเวลาท้องถิ่นของ node (`SIP_CDR_TIMEZONE`, default UTC — node lab ตรงกับ UTC)
+- `call_records`: tenant ทั้งสองฝั่งจาก `CallParties` — `dst` = `<code><เลข>` (ภายใน), `<code>8<code อื่น><เลข>` (ข้าม tenant ที่ยังไม่ผ่าน), `src` = `8<code><เลข>` เมื่อสายข้าม tenant ผ่านแล้ว; status จาก `disposition` (`ANSWERED/NO ANSWER/BUSY`, อื่นๆ = failed) ยกเว้น `dst=denied` = denied; `authorization_code_id` จาก `userfield = authcode:<id>` เฉพาะรหัสของ tenant ผู้โทร; เก็บคอลัมน์ CDR ดิบไว้ด้วย; prune 13 เดือน (`model:prune`)
+- รัน: `cdr:sync {node?}` ทุก 1 นาที; สถานะ sync ในการ์ด node (`/admin/nodes`); หน้า Call history ของ tenant (เห็นสายที่ตนโทรหรือรับ, ฝั่ง tenant อื่นแสดงเป็น `8<code><เลข>`, ชื่อรหัสผ่านเฉพาะฝั่งผู้โทร, แบ่งหน้าด้วย cursor)
+- node lab (29 ต.ค.): 86 แถว — สายรูปแบบ D6 ทุกสาย map tenant ถูก (ภายใน, ข้าม tenant, `authcode:2`); ไม่มี tenant 63 แถว = แถวยุค D1, tenant ทดสอบ 0999 และสาย denied ก่อนมี `<code>denied`
+- **denied ต่อ tenant:** สายที่ถูกปฏิเสธเดิมจบที่ `denied` ร่วม (`src` เลขเปล่า, `dst=denied` → ไม่รู้ tenant) → ตอนนี้ทุก `Goto` ไป `<code>denied` (Playback `ss-noservice`, Hangup 21) เป็นของ `calling:<code>` (prefix ที่ owned เพิ่ม `<code>denied`); tenant ที่ถูกระงับยังคง `<code>denied` ไว้ (state `suspended`) เพราะเบอร์ที่ปิดชี้ไปที่นั่น; `denied` ร่วมยังเขียนไว้สำหรับแถวเก่า. ใน CDR: `dst=<code>denied` → ผู้โทร = code นั้น (หรือจาก `src` `8<code>…` เมื่อโทรข้าม tenant ไปเบอร์ที่ปิด แล้ว code นั้นคือผู้รับ); เลขที่กดหายไป. node lab: reconcile เขียน calling ใหม่ 2 tenant แล้ว clean; `channel originate Local/10010812345678@from-opensips` → CDR `dst=1001denied`, call record = tenant 1001, denied
+- ยังไม่ทำ: AMI listener, registration snapshots, dashboard, alerts, `GET call-records` ใน API
+
 ### ถัดไป
 
-✅ หน้า Operations → ✅ M6 (reinstall บน node lab ผ่าน; ลบ extens เก่ายุค D1 7 ตัวแล้ว) → M7 (CDR sync ก่อน AMI listener)
+✅ หน้า Operations → ✅ M6 → M7: ✅ CDR sync (โค้ด) → ✅ denied ต่อ tenant → ทดสอบ answered/busy/no answer/denied ด้วยโทรศัพท์จริง → AMI listener

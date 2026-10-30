@@ -41,6 +41,8 @@ return [
     // every tenant's SIP domain is <slug>.<suffix>; a wildcard DNS record points it at the nodes
     'sip' => [
         'tenant_domain_suffix' => env('SIP_TENANT_DOMAIN_SUFFIX', 'sip.example.com'),
+        // the time zone of the datetimes Asterisk writes to the cdr table on the nodes
+        'cdr_timezone' => env('SIP_CDR_TIMEZONE', 'UTC'),
     ],
 
     'slack' => [

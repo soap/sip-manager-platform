@@ -3,6 +3,7 @@
 namespace App\Modules\Nodes\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Modules\CallRecords\Actions\SyncCallRecords;
 use App\Modules\Nodes\Actions\CheckNodeConnections;
 use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Enums\AssignmentStatus;
@@ -33,7 +34,7 @@ class NodeController extends Controller
                 ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
             'assignmentStatuses' => AssignmentStatus::options(),
             'nodes' => PbxNode::query()
-                ->with(['secrets', 'latestReconcileRun', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
+                ->with(['secrets', 'latestReconcileRun', 'cdrCursor', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
@@ -56,6 +57,13 @@ class NodeController extends Controller
                     'removed_at' => $node->removed_at?->toIso8601String(),
                     'tenant_routing' => $node->hasTenantDomains(),
                     'can_reconcile' => ReconcileNode::canReconcile($node),
+                    'cdr_sync' => ! SyncCallRecords::canSync($node) ? null : [
+                        'synced_until' => $node->cdrCursor?->synced_until?->toIso8601String(),
+                        'last_run_at' => $node->cdrCursor?->last_run_at?->toIso8601String(),
+                        'last_success_at' => $node->cdrCursor?->last_success_at?->toIso8601String(),
+                        'last_count' => $node->cdrCursor->last_count ?? 0,
+                        'last_error' => $node->cdrCursor?->last_error,
+                    ],
                     'reconcile' => $node->latestReconcileRun === null ? null : [
                         'status' => $node->latestReconcileRun->status->value,
                         'trigger' => $node->latestReconcileRun->trigger,

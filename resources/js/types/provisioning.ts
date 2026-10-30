@@ -41,3 +41,28 @@ export type Operation = {
     updated_at: string | null;
     retryable: boolean;
 };
+
+/** One call of the tenant from the CDR, as the call history lists it. */
+export type CallRecord = {
+    id: number;
+    /** Internal: both ends are the tenant's; outgoing: to another tenant, or refused before the number was known; incoming: from another tenant. */
+    direction: 'internal' | 'outgoing' | 'incoming';
+    from: string | null;
+    to: string | null;
+    status: 'answered' | 'no_answer' | 'busy' | 'failed' | 'denied';
+    started_at: string | null;
+    answered_at: string | null;
+    ended_at: string;
+    duration: number;
+    billsec: number;
+    authorization_code: string | null;
+};
+
+/** How far the CDR of a node has been copied. */
+export type CdrSync = {
+    synced_until: string | null;
+    last_run_at: string | null;
+    last_success_at: string | null;
+    last_count: number;
+    last_error: string | null;
+};

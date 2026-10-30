@@ -6,6 +6,7 @@ import NodeController from '@/actions/App/Modules/Nodes/Http/Controllers/Admin/N
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import CdrSyncStatus from '@/components/nodes/CdrSyncStatus.vue';
 import DriftReport from '@/components/nodes/DriftReport.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +22,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { index } from '@/routes/admin/nodes';
 import { index as tenantExtensions } from '@/routes/tenant/extensions';
-import type { ReconcileRun } from '@/types/provisioning';
+import type { CdrSync, ReconcileRun } from '@/types/provisioning';
 
 type NodeService = {
     release: string | null;
@@ -66,6 +67,7 @@ const props = defineProps<{
         tenant_routing: boolean;
         can_reconcile: boolean;
         reconcile: ReconcileRun | null;
+        cdr_sync: CdrSync | null;
         assignments: Assignment[];
     }[];
 }>();
@@ -318,6 +320,8 @@ function formatDate(value: string | null): string {
                     :node-id="node.id"
                     :run="node.reconcile"
                 />
+
+                <CdrSyncStatus v-if="node.cdr_sync" :sync="node.cdr_sync" />
 
                 <p v-if="!node.tenant_routing" class="text-sm text-destructive">
                     This node serves one shared SIP domain. Reinstall OpenSIPS

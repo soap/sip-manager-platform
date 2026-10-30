@@ -288,18 +288,22 @@ it('compiles calls to tenants that take ours, outbound categories as denied, and
 
     expect(ConfigRevision::query()->sole()->status)->toBe(RevisionStatus::Applied)
         ->and($node->extens['1020x1042'][0]['app'])->toBe('NoOp')
+        ->and($node->extens['1020denied'])->toBe([
+            ['priority' => 1, 'app' => 'Playback', 'appdata' => 'ss-noservice'],
+            ['priority' => 2, 'app' => 'Hangup', 'appdata' => '21'],
+        ])
         ->and($node->extens)->not->toHaveKey('1020x1050')
-        ->and($node->extens['_10200[689]XXXXXXXX'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']])
-        ->and($node->extens['_102000X.'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => 'denied,1']])
+        ->and($node->extens['_10200[689]XXXXXXXX'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => '1020denied,1']])
+        ->and($node->extens['_102000X.'])->toBe([['priority' => 1, 'app' => 'Goto', 'appdata' => '1020denied,1']])
         ->and(array_column($node->extens['_10208XXXX.'], 'appdata', 'priority'))->toBe([
             1 => '$[${REGEX("^[0-9]+$" ${EXTEN:9})}]?3',
-            2 => 'denied,1',
+            2 => '1020denied,1',
             3 => '$[${DIALPLAN_EXISTS(${CONTEXT},1020x${EXTEN:5:4},1)} & ${DIALPLAN_EXISTS(${CONTEXT},${EXTEN:5},1)}]?5',
-            4 => 'denied,1',
+            4 => '1020denied,1',
             5 => '1020p${CALLERID(num)},1',
             6 => '$[${REGEX("/(xa|x${EXTEN:5:4})/" ${GOSUB_RETVAL})}]?10',
             7 => '$[${REGEX("/(XA|X${EXTEN:5:4})/" ${GOSUB_RETVAL})}]?9',
-            8 => 'denied,1',
+            8 => '1020denied,1',
             9 => '1020auth,1(x)',
             10 => 'CALLERID(num)=81020${CALLERID(num)}',
             11 => '${EXTEN:5},1',

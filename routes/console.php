@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\IdempotencyKey;
+use App\Modules\CallRecords\Models\CallRecord;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -16,6 +17,7 @@ Artisan::command('inspire', function () {
 
 Schedule::command('nodes:sync')->everyFiveMinutes()->withoutOverlapping(10);
 Schedule::command('provisioning:relay')->everyTwoSeconds()->withoutOverlapping(1);
-Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();
+Schedule::command('model:prune', ['--model' => [IdempotencyKey::class, CallRecord::class]])->daily();
 Schedule::command('authorization-codes:expire')->everyMinute()->withoutOverlapping(1);
 Schedule::command('nodes:reconcile')->everyFifteenMinutes()->withoutOverlapping(30);
+Schedule::command('cdr:sync')->everyMinute()->withoutOverlapping(5);

@@ -2,6 +2,7 @@
 
 namespace App\Modules\Nodes\Models;
 
+use App\Modules\CallRecords\Models\CdrCursor;
 use App\Modules\Nodes\Enums\NodeSecretKind;
 use App\Modules\Nodes\Policies\PbxNodePolicy;
 use App\Modules\Provisioning\Models\ReconcileRun;
@@ -99,6 +100,16 @@ class PbxNode extends Model
     public function latestReconcileRun(): HasOne
     {
         return $this->hasOne(ReconcileRun::class)->latestOfMany('id');
+    }
+
+    /**
+     * How far the node's CDR has been copied into call records.
+     *
+     * @return HasOne<CdrCursor, $this>
+     */
+    public function cdrCursor(): HasOne
+    {
+        return $this->hasOne(CdrCursor::class);
     }
 
     /**
