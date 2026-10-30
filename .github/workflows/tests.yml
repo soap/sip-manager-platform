@@ -52,5 +52,11 @@ jobs:
         env:
           DB_PASSWORD: postgres
 
-      - name: Run CI Checks
-        run: composer ci:check
+      - name: Check frontend types
+        run: npm run types:check
+
+      - name: Run static analysis
+        run: composer types:check
+
+      - name: Run tests
+        run: php artisan test

@@ -1,6 +1,9 @@
-[![tests](https://github.com/soap/sip-manager-platform/actions/workflows/tests.yml/badge.svg)](https://github.com/soap/sip-manager-platform/actions/workflows/tests.yml)
-
 # SIP Manager
+
+[![Tests](https://github.com/soap/sip-manager-platform/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/soap/sip-manager-platform/actions/workflows/tests.yml)
+[![Code Style](https://github.com/soap/sip-manager-platform/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/soap/sip-manager-platform/actions/workflows/lint.yml)
+![PHP](https://img.shields.io/badge/PHP-8.4%20%7C%208.5-777BB4?logo=php&logoColor=white)
+![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?logo=laravel&logoColor=white)
 
 Telephony Management App สำหรับ VoIP แบบหลาย tenant บน OpenSIPS 3.6 + Asterisk 22 — เป็น control plane ที่เก็บ desired state (tenant, extension, ring group, voicemail, สิทธิ์การโทร) ใน PostgreSQL แล้ว compile และเขียนลงฐานข้อมูลของแต่ละ PBX node พร้อมตรวจผลกลับ (read-back)
 
