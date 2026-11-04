@@ -81,8 +81,10 @@ class ManagePickupGroups
 
                 $group->refresh();
                 $changes = $group->members()->sync($memberIds);
+                // sync() reports ids as given or as read from the pivot, which may be strings
+                $changedIds = array_values(array_map(intval(...), [...$changes['attached'], ...$changes['detached']]));
 
-                $this->provision($group, OperationType::PickupGroupUpdated, [...$changes['attached'], ...$changes['detached']]);
+                $this->provision($group, OperationType::PickupGroupUpdated, $changedIds);
 
                 $this->audit->record('pickup_group.updated', $group, ['name' => $name, 'members' => count($memberIds)]);
             });
@@ -94,7 +96,7 @@ class ManagePickupGroups
     public function delete(PickupGroup $group): void
     {
         DB::transaction(function () use ($group): void {
-            $memberIds = $group->members()->pluck('extensions.id')->all();
+            $memberIds = array_values($group->members()->pluck('extensions.id')->map(intval(...))->all());
 
             $group->delete();
 

@@ -117,13 +117,13 @@ class PickupGroupController extends Controller
      */
     private function extensionOptions(): array
     {
-        return Extension::query()->with('pickupGroups:id,name')->orderBy('extension_number')->get()->map(fn (Extension $extension): array => [
+        return array_values(Extension::query()->with('pickupGroups:id,name')->orderBy('extension_number')->get()->map(fn (Extension $extension): array => [
             'id' => $extension->id,
             'number' => $extension->extension_number,
             'name' => $extension->display_name,
             'status' => $extension->status->value,
             'pickup_group_id' => $extension->pickupGroups->first()?->id,
             'pickup_group' => $extension->pickupGroups->first()?->name,
-        ])->all();
+        ])->all());
     }
 }
