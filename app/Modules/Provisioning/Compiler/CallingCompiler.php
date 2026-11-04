@@ -4,9 +4,13 @@ namespace App\Modules\Provisioning\Compiler;
 
 use App\Modules\Nodes\Models\PbxNode;
 use App\Modules\Nodes\Models\TenantPbxAssignment;
+use App\Modules\Provisioning\Exceptions\ProvisioningRejected;
 use App\Modules\Telephony\Enums\AuthorizationCodeStatus;
 use App\Modules\Telephony\Enums\CallCategory;
 use App\Modules\Telephony\Models\AuthorizationCode;
+use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\PickupGroup;
+use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\Tenant;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -32,6 +36,11 @@ use Illuminate\Database\Eloquent\Collection;
  * Realtime rows run in the entry context (from-opensips) through its switch, so the dialplan looks
  * for extens with DIALPLAN_EXISTS(${CONTEXT},…). pbx_realtime takes the first pattern that matches,
  * not the most specific, so no two patterns of a tenant may overlap.
+ *
+ * - 1042*8, the pickup feature code, while the tenant has a pickup group with members: Goto the
+ *   caller's pickup exten 1042k<caller>, or hang up when the caller is in no group. Each member
+ *   gets 1042k<number>: Pickup() of a phone ringing with its group's mark, or with the mark of a
+ *   ring group that has one of the group's members (NumberCompiler sets both), then Hangup().
  *
  * - 1042denied, where the tenant's refused calls go, also from its disabled numbers: the call
  *   ends there, so the CDR's dst names the tenant (plan §7).
@@ -83,6 +92,8 @@ class CallingCompiler
             $extens[$tenant->code.'x'.$destination] = $this->numbered([['NoOp', "Tenant {$destination} takes calls from {$tenant->code}"]]);
         }
 
+        $extens += $this->pickup($tenant);
+
         foreach (CallCategory::cases() as $category) {
             $extens['_'.$tenant->code.$category->pattern()] = $this->numbered($category === CallCategory::CrossTenant
                 ? $this->crossTenant($tenant, $this->anyCodeUnlocks($codes, $category))
@@ -90,6 +101,80 @@ class CallingCompiler
         }
 
         return new CompiledCalling($tenant->code, 'active', $extens, $codeExtens, $tenant->auth_salt);
+    }
+
+    /**
+     * The tenant's pickup feature code and the pickup exten of each member of its pickup groups;
+     * none while no group has members.
+     *
+     * @return array<string, list<array{priority: int, app: string, appdata: string}>>
+     *
+     * @throws ProvisioningRejected when a group's marks do not fit in one row
+     */
+    private function pickup(Tenant $tenant): array
+    {
+        $groups = PickupGroup::withoutTenantScope()
+            ->where('tenant_id', $tenant->id)
+            ->with('members:id,extension_number')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (PickupGroup $group): bool => $group->members->isNotEmpty());
+
+        if ($groups->isEmpty()) {
+            return [];
+        }
+
+        $ringGroups = RingGroup::withoutTenantScope()->where('tenant_id', $tenant->id)->with('members:id')->orderBy('number')->get();
+        $memberExten = self::pickupMemberExten($tenant->code, '${CALLERID(num)}');
+
+        $extens = [self::pickupExten($tenant->code) => $this->numbered([
+            ['GotoIf', '$[${DIALPLAN_EXISTS(${CONTEXT},'.$memberExten.',1)}]?3'],
+            ['Hangup', ''],
+            ['Goto', $memberExten.',1'],
+        ])];
+
+        foreach ($groups as $group) {
+            $memberIds = $group->members->modelKeys();
+            $marks = [
+                NumberCompiler::pickupMark($tenant->code, $group),
+                ...$ringGroups
+                    ->filter(fn (RingGroup $ringGroup): bool => array_intersect($ringGroup->members->modelKeys(), $memberIds) !== [])
+                    ->map(fn (RingGroup $ringGroup): string => NumberCompiler::ringGroupPickupMark($tenant->code, $ringGroup))
+                    ->values()
+                    ->all(),
+            ];
+            $appdata = implode('&', array_map(fn (string $mark): string => "{$mark}@PICKUPMARK", $marks));
+
+            if (strlen($appdata) > NumberCompiler::MAX_APPDATA) {
+                throw ProvisioningRejected::because('dialplan_too_long', "Pickup group {$group->name} shares members with too many ring groups for one dialplan row.");
+            }
+
+            foreach ($group->members as $member) {
+                /** @var Extension $member */
+                $extens[self::pickupMemberExten($tenant->code, $member->extension_number)] = $this->numbered([
+                    ['Pickup', $appdata],
+                    ['Hangup', ''],
+                ]);
+            }
+        }
+
+        return $extens;
+    }
+
+    /**
+     * The pickup feature code as Asterisk sees it, e.g. 1042*8.
+     */
+    public static function pickupExten(string $tenantCode): string
+    {
+        return $tenantCode.NumberCompiler::PICKUP_EXTEN;
+    }
+
+    /**
+     * Where a member's *8 goes: tenant code, "k", the member's number (or an expression for it).
+     */
+    public static function pickupMemberExten(string $tenantCode, string $number): string
+    {
+        return $tenantCode.'k'.$number;
     }
 
     /**

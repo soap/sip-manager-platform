@@ -2,6 +2,7 @@
 
 namespace App\Modules\Nodes\Models;
 
+use App\Modules\CallRecords\Models\AmiConnection;
 use App\Modules\CallRecords\Models\CdrCursor;
 use App\Modules\Nodes\Enums\NodeSecretKind;
 use App\Modules\Nodes\Policies\PbxNodePolicy;
@@ -32,8 +33,9 @@ use Illuminate\Support\Carbon;
  * @property string $environment lab, pilot or production
  * @property string $status creating, bootstrapping, active, failed, off or deleting
  * @property string|null $region
+ * @property string|null $os Operating system release, e.g. "ubuntu-24.04"
  * @property array{public: string|null, public_ipv6: string|null, private: string|null, management: string|null} $addresses
- * @property array{opensips: array<string, mixed>|null, asterisk: array<string, mixed>|null} $services
+ * @property array{opensips: array<string, mixed>|null, rtpengine?: array<string, mixed>|null, asterisk: array<string, mixed>|null} $services
  * @property array<string, array<string, mixed>> $endpoints opensips_db, asterisk_db, ami and ari, without passwords
  * @property array{entry_context: string, managed_context: string, opensips_endpoint: string, tenant_routing?: string, tenant_code_digits?: int}|null $dialplan
  * @property string|null $credentials_version Version of the secrets held, as the deployer names it
@@ -45,7 +47,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  */
 #[Fillable([
-    'deployer_server_id', 'manifest_version', 'name', 'hostname', 'sip_domain', 'environment', 'status', 'region',
+    'deployer_server_id', 'manifest_version', 'name', 'hostname', 'sip_domain', 'environment', 'status', 'region', 'os',
     'addresses', 'services', 'endpoints', 'dialplan', 'credentials_version',
     'connection_checks', 'checked_at', 'synced_at', 'removed_at',
 ])]
@@ -110,6 +112,16 @@ class PbxNode extends Model
     public function cdrCursor(): HasOne
     {
         return $this->hasOne(CdrCursor::class);
+    }
+
+    /**
+     * The AMI event listener's connection to the node.
+     *
+     * @return HasOne<AmiConnection, $this>
+     */
+    public function amiConnection(): HasOne
+    {
+        return $this->hasOne(AmiConnection::class);
     }
 
     /**

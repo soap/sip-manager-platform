@@ -32,9 +32,11 @@ class PbxNodeFactory extends Factory
             'environment' => 'lab',
             'status' => 'active',
             'region' => 'sgp1',
+            'os' => 'ubuntu-24.04',
             'addresses' => ['public' => fake()->ipv4(), 'public_ipv6' => null, 'private' => $privateIp, 'management' => $privateIp],
             'services' => [
                 'opensips' => ['release' => '3.6', 'version' => null, 'status' => 'installed', 'installed_at' => null, 'transports' => ['udp', 'tcp'], 'sip_port' => 5060],
+                'rtpengine' => ['release' => null, 'version' => '13.5.1.4', 'status' => 'installed', 'installed_at' => null],
                 'asterisk' => ['release' => '22', 'version' => '22.11.0', 'status' => 'installed', 'installed_at' => null, 'features' => ['ami', 'ari', 'realtime', 'voicemail']],
             ],
             'endpoints' => [

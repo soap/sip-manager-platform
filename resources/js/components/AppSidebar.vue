@@ -5,6 +5,7 @@ import {
     KeyRound,
     Phone,
     PhoneForwarded,
+    PhoneIncoming,
     PhoneOutgoing,
     LayoutGrid,
     History,
@@ -37,6 +38,7 @@ import { index as auditLog } from '@/routes/tenant/audit-log';
 import { index as calling } from '@/routes/tenant/calling';
 import { index as calls } from '@/routes/tenant/calls';
 import { index as extensions } from '@/routes/tenant/extensions';
+import { index as pickupGroups } from '@/routes/tenant/pickup-groups';
 import { index as ringGroups } from '@/routes/tenant/ring-groups';
 import { index as members } from '@/routes/tenant/members';
 import { index as operations } from '@/routes/tenant/operations';
@@ -90,6 +92,11 @@ const tenantNavItems = computed<NavItem[]>(() => {
             title: 'Ring groups',
             href: ringGroups({ tenant: tenant.slug }),
             icon: PhoneForwarded,
+        },
+        {
+            title: 'Pickup groups',
+            href: pickupGroups({ tenant: tenant.slug }),
+            icon: PhoneIncoming,
         },
         {
             title: 'Calling permissions',

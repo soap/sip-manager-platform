@@ -14,6 +14,7 @@ use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Telephony\NumberAllocator;
+use App\Modules\Telephony\PickupGroupDependents;
 use App\Modules\Telephony\RingGroupDependents;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,7 @@ class ManageRingGroups
         private RequestProvisioning $provisioning,
         private NumberAllocator $numbers,
         private RingGroupDependents $dependents,
+        private PickupGroupDependents $pickupGroups,
     ) {}
 
     /**
@@ -66,6 +68,8 @@ class ManageRingGroups
 
                 $this->syncMembers($group, $memberIds);
                 $this->provision($group, OperationType::RingGroupCreated);
+                // a pickup group sharing its members can now answer its calls
+                $this->pickupGroups->ringGroupChanged($group);
 
                 $this->audit->record('ring_group.created', $group, ['number' => $number, 'name' => $name, 'members' => count($memberIds)]);
 
@@ -109,6 +113,7 @@ class ManageRingGroups
             $group->refresh();
             $this->syncMembers($group, $memberIds);
             $this->provision($group, OperationType::RingGroupUpdated);
+            $this->pickupGroups->ringGroupChanged($group);
 
             $this->audit->record('ring_group.updated', $group, [
                 'number' => $group->number,
@@ -130,6 +135,7 @@ class ManageRingGroups
             $group->delete();
 
             $this->provision($group, OperationType::RingGroupDeleted);
+            $this->pickupGroups->ringGroupChanged($group);
 
             $this->audit->record('ring_group.deleted', $group, ['number' => $group->number, 'name' => $group->name]);
         });

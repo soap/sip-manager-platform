@@ -13,6 +13,7 @@ use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
 use App\Modules\Telephony\Models\SipCredential;
 use App\Modules\Telephony\NumberAllocator;
+use App\Modules\Telephony\PickupGroupDependents;
 use App\Modules\Telephony\RingGroupDependents;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,7 @@ class ManageExtensions
         private RequestProvisioning $provisioning,
         private NumberAllocator $numbers,
         private RingGroupDependents $ringGroups,
+        private PickupGroupDependents $pickupGroups,
     ) {}
 
     /**
@@ -126,6 +128,7 @@ class ManageExtensions
         return DB::transaction(function () use ($extension): ProvisioningOperation {
             // before the delete, while its memberships still point at the groups
             $this->ringGroups->extensionChanged($extension, deleted: true);
+            $this->pickupGroups->extensionDeleted($extension);
 
             DialNumber::query()->where('owner_type', Extension::MORPH)->where('owner_id', $extension->id)->delete();
             $extension->delete();

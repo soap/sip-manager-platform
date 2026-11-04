@@ -6,8 +6,8 @@ namespace App\Modules\Provisioning\Compiler;
  * What a tenant's calling dialplan should look like on its node (plan D7): every exten it owns in
  * the managed context, by name. The tenant owns the extens starting with "_<code>" (the patterns of
  * what its phones dial beyond their own numbers), "<code>a" (its authorization codes and the
- * subroutine that asks for one), "<code>x" (one per tenant that takes its calls) and
- * "<code>denied" (where its refused calls go). Writing it replaces all of them, so an exten left
+ * subroutine that asks for one), "<code>x" (one per tenant that takes its calls), "<code>*8" and
+ * "<code>k" (call pickup) and "<code>denied" (where its refused calls go). Writing it replaces all of them, so an exten left
  * out is removed.
  */
 final readonly class CompiledCalling
@@ -37,7 +37,14 @@ final readonly class CompiledCalling
      */
     public static function prefixesOf(string $tenantCode): array
     {
-        return ['_'.$tenantCode, $tenantCode.'a', $tenantCode.'x', NumberCompiler::deniedExten($tenantCode)];
+        return [
+            '_'.$tenantCode,
+            $tenantCode.'a',
+            $tenantCode.'x',
+            CallingCompiler::pickupExten($tenantCode),
+            CallingCompiler::pickupMemberExten($tenantCode, ''),
+            NumberCompiler::deniedExten($tenantCode),
+        ];
     }
 
     /**

@@ -25,6 +25,8 @@ it('lists the nodes without their passwords', function () {
         ->assertInertia(fn (Assert $page) => $page->component('admin/nodes/Index')
             ->has('nodes', 2)
             ->where('nodes.0.id', $node->id)
+            ->where('nodes.0.os', 'ubuntu-24.04')
+            ->where('nodes.0.rtpengine.version', '13.5.1.4')
             ->where('nodes.0.credentials', ['opensips_db', 'asterisk_db', 'ami', 'ari']));
 
     expect($response->getContent())->not->toContain($node->credentials()['ami']['password']);

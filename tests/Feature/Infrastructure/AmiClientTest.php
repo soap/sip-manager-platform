@@ -8,24 +8,6 @@ use App\Modules\Infrastructure\Asterisk\Exceptions\AmiUnavailable;
 use App\Modules\Nodes\Models\PbxNode;
 
 /**
- * One AMI message as Asterisk writes it.
- *
- * @param  array<string, string|list<string>>  $fields
- */
-function amiReply(array $fields): string
-{
-    $message = '';
-
-    foreach ($fields as $key => $values) {
-        foreach ((array) $values as $value) {
-            $message .= "{$key}: {$value}\r\n";
-        }
-    }
-
-    return $message."\r\n";
-}
-
-/**
  * An AmiClient over a local socket whose far end has already written the script.
  *
  * @return array{AmiClient, Closure(): string} the client, and a function that closes it and returns what it sent

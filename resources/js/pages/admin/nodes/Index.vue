@@ -6,6 +6,7 @@ import NodeController from '@/actions/App/Modules/Nodes/Http/Controllers/Admin/N
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import AmiListenerStatus from '@/components/nodes/AmiListenerStatus.vue';
 import CdrSyncStatus from '@/components/nodes/CdrSyncStatus.vue';
 import DriftReport from '@/components/nodes/DriftReport.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -22,7 +23,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { index } from '@/routes/admin/nodes';
 import { index as tenantExtensions } from '@/routes/tenant/extensions';
-import type { CdrSync, ReconcileRun } from '@/types/provisioning';
+import type { AmiListener, CdrSync, ReconcileRun } from '@/types/provisioning';
 
 type NodeService = {
     release: string | null;
@@ -52,8 +53,10 @@ const props = defineProps<{
         environment: string;
         status: string;
         region: string | null;
+        os: string | null;
         management_address: string | null;
         opensips: NodeService | null;
+        rtpengine: NodeService | null;
         asterisk: NodeService | null;
         endpoints: string[];
         credentials: string[];
@@ -68,6 +71,7 @@ const props = defineProps<{
         can_reconcile: boolean;
         reconcile: ReconcileRun | null;
         cdr_sync: CdrSync | null;
+        ami_listener: AmiListener | null;
         assignments: Assignment[];
     }[];
 }>();
@@ -103,6 +107,18 @@ const endpointLabels: Record<string, string> = {
 
 function formatDate(value: string | null): string {
     return value ? new Date(value).toLocaleString() : 'never';
+}
+
+/** The exact version when the deployer read one, else the release line it installed. */
+function serviceVersion(service: NodeService): string {
+    return service.version ?? service.release ?? 'unknown version';
+}
+
+/** "ubuntu-24.04" as "Ubuntu 24.04". */
+function formatOs(os: string): string {
+    const [name, ...version] = os.split('-');
+
+    return [name.charAt(0).toUpperCase() + name.slice(1), ...version].join(' ');
 }
 </script>
 
@@ -191,18 +207,23 @@ function formatDate(value: string | null): string {
                             </div>
                         </td>
                         <td class="px-4 py-2 text-xs">
+                            <div v-if="node.os" class="text-muted-foreground">
+                                {{ formatOs(node.os) }}
+                            </div>
                             <div v-if="node.opensips">
-                                OpenSIPS {{ node.opensips.release }}
+                                OpenSIPS {{ serviceVersion(node.opensips) }}
                                 <span class="text-muted-foreground"
                                     >({{ node.opensips.status }})</span
                                 >
                             </div>
+                            <div v-if="node.rtpengine">
+                                rtpengine {{ serviceVersion(node.rtpengine) }}
+                                <span class="text-muted-foreground"
+                                    >({{ node.rtpengine.status }})</span
+                                >
+                            </div>
                             <div v-if="node.asterisk">
-                                Asterisk
-                                {{
-                                    node.asterisk.version ??
-                                    node.asterisk.release
-                                }}
+                                Asterisk {{ serviceVersion(node.asterisk) }}
                                 <span class="text-muted-foreground"
                                     >({{ node.asterisk.status }})</span
                                 >
@@ -322,6 +343,11 @@ function formatDate(value: string | null): string {
                 />
 
                 <CdrSyncStatus v-if="node.cdr_sync" :sync="node.cdr_sync" />
+
+                <AmiListenerStatus
+                    v-if="node.ami_listener"
+                    :listener="node.ami_listener"
+                />
 
                 <p v-if="!node.tenant_routing" class="text-sm text-destructive">
                     This node serves one shared SIP domain. Reinstall OpenSIPS

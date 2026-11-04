@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Carbon;
@@ -88,6 +89,18 @@ class Extension extends Model
     public function sipCredential(): HasOne
     {
         return $this->hasOne(SipCredential::class)->withoutGlobalScope(SipCredential::TENANT_SCOPE);
+    }
+
+    /**
+     * The pickup group it is in: at most one (pickup_group_members.extension_id is unique).
+     *
+     * @return BelongsToMany<PickupGroup, $this>
+     */
+    public function pickupGroups(): BelongsToMany
+    {
+        return $this->belongsToMany(PickupGroup::class, 'pickup_group_members')
+            ->withoutGlobalScope(PickupGroup::TENANT_SCOPE)
+            ->withTimestamps();
     }
 
     /**

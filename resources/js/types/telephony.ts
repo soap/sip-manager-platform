@@ -49,6 +49,16 @@ export type RingGroupOption = {
     name: string;
 };
 
+/** An extension that can join a pickup group, with the group it is in now. */
+export type PickupExtensionOption = {
+    id: number;
+    number: string;
+    name: string;
+    status: 'active' | 'disabled';
+    pickup_group_id: number | null;
+    pickup_group: string | null;
+};
+
 export type RingGroupFormOptions = {
     extensions: ExtensionOption[];
     failoverGroups: RingGroupOption[];

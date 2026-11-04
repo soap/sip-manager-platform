@@ -36,6 +36,7 @@ function deployerManifest(int $id = 7, array $overrides = []): array
         'addresses' => ['public' => '203.0.113.20', 'public_ipv6' => null, 'private' => '10.104.0.5', 'management' => '10.104.0.5'],
         'services' => [
             'opensips' => ['release' => '3.6', 'version' => null, 'status' => 'installed', 'installed_at' => null, 'transports' => ['udp', 'tcp'], 'sip_port' => 5060],
+            'rtpengine' => ['release' => null, 'version' => '13.5.1.4', 'status' => 'installed', 'installed_at' => null],
             'asterisk' => ['release' => '22', 'version' => '22.11.0', 'status' => 'installed', 'installed_at' => null, 'features' => ['ami', 'ari', 'realtime']],
         ],
         'endpoints' => [
@@ -73,6 +74,8 @@ it('copies the manifests and fetches the credentials with the deployer token', f
 
     expect($result)->toMatchArray(['synced' => 1, 'added' => 1, 'removed' => 0, 'credentials_updated' => 1])
         ->and($node->sip_domain)->toBe('sip7.example.com')
+        ->and($node->os)->toBe('ubuntu-24.04')
+        ->and($node->services['rtpengine']['version'])->toBe('13.5.1.4')
         ->and($node->endpoints['opensips_db']['database'])->toBe('opensips')
         ->and($node->asteriskFeatures())->toBe(['ami', 'ari', 'realtime'])
         ->and($node->credentials()['ami']['password'])->toBe('AmiSecret')

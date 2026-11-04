@@ -9,6 +9,7 @@ use App\Modules\Telephony\Enums\FailoverType;
 use App\Modules\Telephony\Enums\RingStrategy;
 use App\Modules\Telephony\Models\DialNumber;
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\PickupGroup;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\Tenant;
 
@@ -34,6 +35,11 @@ use App\Modules\Tenancy\Models\Tenant;
  * busy call is left there (VoiceMail ... b or u) before Hangup(). Phones reach their own box with
  * *97, which reaches Asterisk as 1042*97.
  *
+ * A member of a pickup group sets the group's mark on the ringing phone before Dial (Set
+ * _PICKUPMARK=1042g<group id>), and a ring group with a member in a pickup group sets its own mark
+ * (1042r500), so a colleague's *8 finds the call (see CallingCompiler). An extension outside every
+ * pickup group keeps its plain rows.
+ *
  * An active extension also gets the permission exten 1042p101 (plan D7): Return() with the flags
  * of its calling profile, which CallingCompiler's dialplan asks for with Gosub. Without that row
  * the Gosub fails and the call ends, so a disabled extension calls nowhere outside the tenant.
@@ -56,6 +62,9 @@ class NumberCompiler
 
     /** The feature code for one's own mailbox, as the phone dials it. */
     public const VOICEMAIL_MAIN_EXTEN = '*97';
+
+    /** The feature code that answers a phone ringing in the caller's pickup group. */
+    public const PICKUP_EXTEN = '*8';
 
     /** The ha1 of a disabled account; a real digest is hex, so it never matches a password. */
     public const DISABLED_HA1 = 'disabled';
@@ -157,6 +166,22 @@ class NumberCompiler
     }
 
     /**
+     * The mark a ringing member of the pickup group carries, e.g. 1042g3.
+     */
+    public static function pickupMark(string $tenantCode, PickupGroup $group): string
+    {
+        return $tenantCode.'g'.$group->id;
+    }
+
+    /**
+     * The mark a ringing member of the ring group carries, e.g. 1042r500.
+     */
+    public static function ringGroupPickupMark(string $tenantCode, RingGroup $group): string
+    {
+        return $tenantCode.'r'.$group->number;
+    }
+
+    /**
      * The voicemail context of the tenant's boxes: "t" and its code.
      */
     public static function voicemailContext(Tenant $tenant): string
@@ -174,6 +199,7 @@ class NumberCompiler
         }
 
         $voicemail = $extension->hasVoicemail();
+        $pickupGroup = $extension->pickupGroups()->first();
 
         if ($voicemail && ! $node->hasVoicemail()) {
             throw ProvisioningRejected::because('node_capability', "Node {$node->name} has no voicemail; turn voicemail off for {$number}.");
@@ -185,6 +211,8 @@ class NumberCompiler
             'ha1' => $credential->ha1($tenant->sip_domain),
             'ha1_sha256' => $credential->ha1Sha256($tenant->sip_domain),
         ], $this->numbered([
+            // inherited by the ringing channel, where a colleague's Pickup() looks for it
+            ...($pickupGroup === null ? [] : [['Set', '_PICKUPMARK='.self::pickupMark($tenant->code, $pickupGroup)]]),
             ['Dial', $this->dialString($node, [$tenant->routingNumber($number)], self::RING_SECONDS)],
             // a busy phone gets the busy greeting, anything else the unavailable one
             ...($voicemail ? [['VoiceMail', $this->mailboxOf($tenant, $extension).',${IF($["${DIALSTATUS}" = "BUSY"]?b:u)}']] : []),
@@ -222,11 +250,12 @@ class NumberCompiler
 
     private function ringGroup(PbxNode $node, Tenant $tenant, RingGroup $group): CompiledNumber
     {
-        $members = array_values($group->members()
+        $ringing = $group->members()
+            ->withExists('pickupGroups')
             ->get()
-            ->filter(fn (Extension $member): bool => $member->isActive() && $member->pbx_node_id === $node->id)
-            ->map(fn (Extension $member): string => $tenant->routingNumber($member->extension_number))
-            ->all());
+            ->filter(fn (Extension $member): bool => $member->isActive() && $member->pbx_node_id === $node->id);
+        $members = array_values($ringing->map(fn (Extension $member): string => $tenant->routingNumber($member->extension_number))->all());
+        $pickable = $ringing->contains(fn (Extension $member): bool => (bool) $member->getAttribute('pickup_groups_exists'));
 
         $dials = match (true) {
             $members === [] => [],
@@ -235,6 +264,7 @@ class NumberCompiler
         };
 
         return new CompiledNumber($tenant->routingNumber($group->number), 'active', null, $this->numbered([
+            ...($pickable ? [['Set', '_PICKUPMARK='.self::ringGroupPickupMark($tenant->code, $group)]] : []),
             ...$dials,
             ...$this->failover($node, $tenant, $group),
         ]), null, $group->number, $tenant->sip_domain, self::voicemailContext($tenant));

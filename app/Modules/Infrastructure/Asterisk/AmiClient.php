@@ -11,7 +11,7 @@ use Throwable;
 /**
  * A small blocking client for the Asterisk Manager Interface (TCP 5038): one action at a time, each
  * answered by the message with its ActionID. Logs in with events off, so unrelated events are rare
- * and skipped. For the long-running event listener of Phase 3 see plan v0.2 §7.
+ * and skipped. The long-running event listener of Phase 3 reads events with AmiEventStream.
  */
 class AmiClient
 {
@@ -53,9 +53,10 @@ class AmiClient
     }
 
     /**
-     * Reads the "Asterisk Call Manager/x.y" banner and logs in without events.
+     * Reads the "Asterisk Call Manager/x.y" banner and logs in, without events unless given an
+     * event mask such as "call,user".
      */
-    public function login(string $username, string $password): void
+    public function login(string $username, string $password, string $events = 'off'): void
     {
         $banner = fgets($this->socket);
 
@@ -67,7 +68,7 @@ class AmiClient
             throw AmiUnavailable::notAmi();
         }
 
-        $this->action('Login', ['Username' => $username, 'Secret' => $password, 'Events' => 'off']);
+        $this->action('Login', ['Username' => $username, 'Secret' => $password, 'Events' => $events]);
     }
 
     /**
@@ -140,9 +141,11 @@ class AmiClient
     }
 
     /**
+     * One message as AMI expects it, ended by the blank line.
+     *
      * @param  array<string, string|int>  $fields
      */
-    private function write(array $fields): void
+    public static function encode(array $fields): string
     {
         $message = '';
 
@@ -156,7 +159,15 @@ class AmiClient
             $message .= "{$key}: {$value}\r\n";
         }
 
-        if (@fwrite($this->socket, $message."\r\n") === false) {
+        return $message."\r\n";
+    }
+
+    /**
+     * @param  array<string, string|int>  $fields
+     */
+    private function write(array $fields): void
+    {
+        if (@fwrite($this->socket, self::encode($fields)) === false) {
             throw AmiUnavailable::closed();
         }
     }

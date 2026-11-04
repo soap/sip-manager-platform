@@ -112,6 +112,7 @@ class SyncNodes
             'environment' => $manifest['environment'] ?? 'lab',
             'status' => $manifest['status'] ?? 'unknown',
             'region' => $manifest['region'] ?? null,
+            'os' => $manifest['os'] ?? null,
             'addresses' => $manifest['addresses'] ?? [],
             'services' => $manifest['services'] ?? [],
             'endpoints' => $manifest['endpoints'] ?? [],

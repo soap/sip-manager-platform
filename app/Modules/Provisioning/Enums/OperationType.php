@@ -11,7 +11,10 @@ enum OperationType: string
     case RingGroupCreated = 'ring_group.created';
     case RingGroupUpdated = 'ring_group.updated';
     case RingGroupDeleted = 'ring_group.deleted';
-    /** A member or failover target of a ring group changed or went away. */
+    case PickupGroupCreated = 'pickup_group.created';
+    case PickupGroupUpdated = 'pickup_group.updated';
+    case PickupGroupDeleted = 'pickup_group.deleted';
+    /** A member or failover target of a ring group changed or went away, or a pickup group took in or let go of an extension. */
     case DependencyChanged = 'dependency.changed';
     /** The tenant's assignment changed (e.g. suspended), so its numbers are written again. */
     case AssignmentChanged = 'assignment.changed';

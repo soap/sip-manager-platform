@@ -251,6 +251,15 @@ _ลำดับงาน D7 และเกณฑ์ผ่าน (node lab)_ �
 
 - เกณฑ์ผ่าน: profile ข้าม tenant = `allow` → ดังโดยไม่ถามรหัส; `code` → ถามรหัส: รหัสผิด 3 ครั้ง = denied, รหัสที่ไม่ปลด `x` = denied, รหัสที่ปิดหรือหมดอายุ = denied, รหัสถูก = ดัง และ CDR มี `authcode:<id>`; `deny` → denied ทันทีแม้มีรหัส; tenant ไม่มีรหัสที่ปลด `x` → denied โดยไม่ถามรหัส; ปลายทางไม่รับเรา → denied แม้รหัสถูก
 
+**D8 — Call pickup group (ตกลง 5 พ.ย. 2026)**
+
+- ปัญหา: โทรศัพท์ทุกเครื่องเข้ามาทาง endpoint `opensips` ตัวเดียว จึงใช้ `pickupgroup`/`namedpickupgroup` ของ PJSIP endpoint ไม่ได้ (ทุกสายมี group เดียวกัน) → ใช้ `PICKUPMARK` แทน
+- `pickup_groups`: tenant_id, name (unique ต่อ tenant), version; `pickup_group_members`: pickup_group_id, extension_id (**unique** — extension อยู่ได้กลุ่มเดียว เพราะสายที่ดังมี `PICKUPMARK` ได้ค่าเดียว); กลุ่มไม่มีเบอร์ จึงไม่อยู่ใน `dial_numbers`
+- ฝั่งที่ดัง (`number:`): extension ที่อยู่ในกลุ่มได้ `Set(_PICKUPMARK=<code>g<group id>)` ก่อน `Dial` (ขา callee สืบทอดตัวแปร); ring group ที่มีสมาชิก active อยู่ใน pickup group ใดก็ได้ `Set(_PICKUPMARK=<code>r<เบอร์กลุ่ม>)` ก่อน Dial แรก; extension/ring group ที่ไม่เกี่ยวข้องได้แถวเหมือนเดิม
+- ฝั่งที่รับ (`calling:<code>`, prefix ที่ owned เพิ่ม `<code>*8` และ `<code>k`): เมื่อ tenant มีกลุ่มที่มีสมาชิก — `<code>*8` = `GotoIf(DIALPLAN_EXISTS(${CONTEXT},<code>k${CALLERID(num)},1)?3)`, `Hangup()`, `Goto(<code>k${CALLERID(num)},1)`; สมาชิกแต่ละคนได้ `<code>k<เบอร์>` = `Pickup(<code>g<id>@PICKUPMARK&<code>r<rg>@PICKUPMARK…)` (mark ของกลุ่ม + mark ของทุก ring group ที่มีสมาชิกร่วมกับกลุ่ม) แล้ว `Hangup()`; `appdata` เกิน 256 = `dialplan_too_long`
+- Dependency: เปลี่ยนสมาชิก = `calling:` + `number:` ของ extension ที่เข้า/ออก + ring group ที่มี extension นั้น (`DependencyChanged`); สร้าง/แก้/ลบ ring group ขณะ tenant มี pickup group = `calling:`; ลบ extension ที่อยู่ในกลุ่ม = `calling:` (`PickupGroupDependents`)
+- ข้อจำกัด: `*8` เชื่อ `CALLERID(num)` แบบเดียวกับ `*97` และ `<code>p<ext>` (ปลอม caller ID ได้ = รับสายกลุ่มอื่นใน tenant เดียวกัน, ข้าม tenant ไม่ได้); ring group ที่ failover ไป extension ที่ไม่อยู่ในกลุ่มยังคง mark ของ ring group ไว้; สมาชิกที่ปิดยังมี `<code>k<ext>` (register ไม่ได้อยู่แล้ว); ยังไม่มี directed pickup (`**<ext>`); node ต้องโหลด `app_directed_pickup`
+
 _เลื่อนไป Phase 4 (21 ต.ค. 2026):_ การคิดค่าใช้ trunk กลาง (แค่รายงานจาก CDR หรือมีวงเงิน/ตัดสาย) — ระหว่างนี้แค่เก็บ `accountcode` + ชื่อ trunk ใน CDR ให้พร้อม
 
 ---
@@ -308,6 +317,7 @@ app/Modules/
 | `dial_numbers`                       | tenant_id, pbx_node_id, number, owner morph (extension / ring group); unique (tenant_id, number) — ทะเบียนเบอร์กลาง (D5)                                                                                                             |
 | `sip_credentials`                    | tenant_id, extension_id (unique), pbx_node_id, sip_username, secret (encrypted, D4), rotated_at; unique (tenant_id, sip_username) — ha1 คำนวณตอน apply                                                                             |
 | `ring_groups` / `ring_group_members` | number, name, strategy, ring_seconds, failover_type/id, status, version; สมาชิก (ring_group_id, extension_id, position)                                                                                                             |
+| `pickup_groups` / `pickup_group_members` | tenant_id, name (unique ต่อ tenant), version; สมาชิก (pickup_group_id, extension_id unique — กลุ่มเดียวต่อ extension) (D8) |
 | `calling_profiles`                   | tenant_id, name, categories json (หมวด → `allow/code`), cross_tenant_scope (`all/selected`), is_default, version; unique (tenant_id, name)                                                                                          |
 | `calling_profile_destinations`       | calling_profile_id, destination_tenant_id — ใช้เมื่อ `cross_tenant_scope = selected`                                                                                                                                                |
 | `authorization_codes`                | tenant_id, label, user_id (nullable), categories json, `node_hash` = md5(auth_salt + รหัส), status, expires_at, version; unique (tenant_id, node_hash)                                                                               |
@@ -425,10 +435,11 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 - `asterisk.extensions` (context `managed`, target `number:1042101`):
     - exten `1042101`: 1 `Dial(PJSIP/1042101@opensips,30)` → (ถ้าเปิด voicemail) `VoiceMail(101@t1042,${IF($["${DIALSTATUS}" = "BUSY"]?b:u)})` → `Hangup()` — OpenSIPS แปลง `1042101` กลับเป็น `101@acme.sip.example.com` ก่อน `lookup`
     - exten `1042p101`: `Return(<flags>)` — สิทธิ์การโทรจาก calling profile (D7)
+    - (ถ้าอยู่ใน pickup group 3) แถวแรกของ `1042101` = `Set(_PICKUPMARK=1042g3)` ก่อน Dial; ring group 500 ที่มีสมาชิกอยู่ใน pickup group = `Set(_PICKUPMARK=1042r500)` (D8)
 - `asterisk.voicemail` (ถ้าเปิด): `context=t1042, mailbox=101, password=<pin>, fullname`
 - ต่อ tenant: `1042*97` → `VoiceMailMain(${CALLERID(num)}@t1042)`; ร่วมทุก tenant: `denied` → `Playback(ss-noservice)`, `Hangup(21)`
 - extension ที่ปิด / tenant หรือ assignment suspended: subscriber `ha1 = ha1_sha256 = "disabled"` (OpenSIPS ตอบ `403 Account disabled`) + exten → `Goto(denied,1)`, ไม่มี `1042p101`; ลบ = ไม่มีแถว
-- สิทธิ์ตามหมวดและรหัสอนุญาตอยู่ใน target `calling:1042` (`CallingCompiler`) — ดู D7 และ §12
+- สิทธิ์ตามหมวดและรหัสอนุญาตอยู่ใน target `calling:1042` (`CallingCompiler`) — ดู D7 และ §12; pickup (`1042*8`, `1042k101`) ก็อยู่ใน target นี้ — ดู D8
 - ไม่เขียน `ps_*` สำหรับโทรศัพท์ (โทรศัพท์ register ที่ OpenSIPS); `ps_*` ใช้กับ trunk ใน Phase 4
 
 ### 6.3 Read-back / health check
@@ -457,7 +468,7 @@ Management App: `nodes:sync` ทุก 5 นาที + ปุ่ม Sync; เ�
 ## 7. Phase 3 — CDR, Call Events, Monitoring
 
 - **CDR sync** (`cdr:sync` ทุก 1 นาทีต่อ node): อ่านตาราง `cdr` ด้วย watermark ที่ `end` ย้อนหลัง 5 นาที (กัน CDR ช้า) → upsert ด้วย (node, uniqueid, sequence) → map tenant จาก 4 หลักแรกของ `dst` (tenant code ตาม D6) — ต้องตรวจคอลัมน์จริงของ Alembic `cdr` บน server (มี `linkedid`, `sequence`, `peeraccount`)
-- **AMI listener** (`ami:listen {node}`): ReactPHP/amphp socket client ขนาดเล็ก (ไม่ใช้ PAMI ที่ไม่ดูแลแล้ว), subscribe `call,cdr,reporting`, reconnect + backoff, heartbeat `Ping`; เขียน `call_events` ผ่าน queue `events` dedupe ด้วย hash(node, uniqueid, event, timestamp)
+- **AMI listener** (`ami:listen {node?}`): socket client ขนาดเล็กด้วย `stream_select` (ไม่ใช้ PAMI ที่ไม่ดูแลแล้ว และไม่เพิ่ม ReactPHP/amphp — process เดียวฟังได้ทุก node), subscribe `call,agent,user,cdr` (ไม่เอา `reporting` เพราะ RTCP ถี่มาก; `user` สำหรับ `AuthCodeFailed`), reconnect + backoff, heartbeat `Ping`; เขียน `call_events` ผ่าน queue `events` dedupe ด้วย (node, session ของการเชื่อมต่อ, ลำดับ) — ไม่ใช้ hash(…, timestamp) เพราะ node ไม่เปิด `timestampevents` และ event ที่เหมือนกันทุก field เกิดซ้ำได้จริง (`AuthCodeFailed` 3 ครั้ง)
 - **Registration status**: อ่าน `opensips.location` ทุก 1 นาที → `registration_snapshots` (หน่วงได้ถึง ~60s จาก write-back — แสดงเวลาที่ "seen")
 - **Business monitoring** (ไม่ซ้ำกับ SIP Deployer): extension ที่ไม่ register, provisioning ค้าง/failed, CDR sync หยุด, AMI listener หลุด, reconcile พบ drift, register fail/สายผิดปกติต่อ tenant; แจ้งผ่าน mail/Slack
 - Retention: CDR 13 เดือน, call_events 30 วัน (ตั้งค่าได้)
@@ -471,18 +482,18 @@ API (ตาม §12 ของ v1.1) — Idempotency-Key บน POST, `If-Match`/
 | สถานะ   | Endpoints `/api/v1`                                                                                                                                                                                                                                                                                                   |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ✅ มีแล้ว | `GET tenant`, `GET\|POST extensions`, `GET\|PATCH\|DELETE extensions/{id}`, `POST extensions/{id}/rotate-credential`, `GET operations/{id}`, `GET\|POST calling-profiles`, `GET\|PATCH\|DELETE calling-profiles/{id}`, `POST calling-profiles/{id}/default`, `GET\|POST authorization-codes`, `GET\|PATCH\|DELETE authorization-codes/{id}`, `POST authorization-codes/{id}/reset`, `GET\|PATCH cross-tenant`, `GET directory` |
-| ⏳ ยังไม่มี | voicemail / reapply / ring groups ใน API, `POST extensions/{id}/devices`, `GET call-records`, trunks / outbound-routes (Phase 4)                                                                                                                                                                                      |
+| ⏳ ยังไม่มี | voicemail / reapply / ring groups / pickup groups ใน API, `POST extensions/{id}/devices`, `GET call-records`, trunks / outbound-routes (Phase 4)                                                                                                                                                                                      |
 
 หน้าจอ (Inertia/Vue) — ✅ = มีแล้ว:
 
 - **Platform admin**: ✅ Nodes (`/admin/nodes`: sync, สถานะ endpoint, ทดสอบการเชื่อมต่อ, assign tenant), ✅ Tenants (`/admin/tenants`), ✅ Operations (`/admin/operations`: ทั้งระบบ, retry), ✅ Drift report (ในการ์ดของแต่ละ node ที่ `/admin/nodes` + ปุ่ม Reconcile now)
-- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Calling permissions (`/calling`), Members, Audit log, API tokens, Operations (`/t/{slug}/operations`); Call history (`/t/{slug}/calls`); ⏳ Devices
+- **Tenant** (`/t/{slug}/…`): ✅ Dashboard, Extensions (สร้าง/แก้/ปิด, รหัส SIP แสดงครั้งเดียว, หมุนรหัส, voicemail + PIN, calling profile, สถานะ register, reapply), Ring groups, Pickup groups (`/pickup-groups`), Calling permissions (`/calling`), Members, Audit log, API tokens, Operations (`/t/{slug}/operations`); Call history (`/t/{slug}/calls`); ⏳ Devices
 
 ---
 
 ## 9. ลำดับงาน (milestones + เกณฑ์ผ่าน)
 
-สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ (reinstall จริงจาก SIP Deployer ผ่าน, โทรได้), M7 กำลังทำ (CDR sync ✅ ในโค้ด, AMI listener ยังไม่เริ่ม) — รายละเอียดใน §12
+สถานะ (29 ต.ค. 2026): M0 ส่วนใหญ่เสร็จ (ค้างทดสอบ PAI ปลอม), M1–M2 ✅, M3 ✅ ยกเว้น integration test ใน Docker, M4 ✅, M5 ✅ (P0 ผ่าน, D7 ผ่านด้วยโทรศัพท์จริง 2 tenant), M6 ✅ (reinstall จริงจาก SIP Deployer ผ่าน, โทรได้), M7 กำลังทำ (CDR sync ✅ ในโค้ด, AMI listener ✅ ในโค้ด) — รายละเอียดใน §12
 
 | #      | งาน                                                                                                                                                                                                       | เกณฑ์ผ่าน                                                                                                                                                            |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -695,8 +706,29 @@ Phase 5: IVR (ARI Stasis, versioned flow), TTS, CRM adapter (vTiger ก่อน
 - รัน: `cdr:sync {node?}` ทุก 1 นาที; สถานะ sync ในการ์ด node (`/admin/nodes`); หน้า Call history ของ tenant (เห็นสายที่ตนโทรหรือรับ, ฝั่ง tenant อื่นแสดงเป็น `8<code><เลข>`, ชื่อรหัสผ่านเฉพาะฝั่งผู้โทร, แบ่งหน้าด้วย cursor)
 - node lab (29 ต.ค.): 86 แถว — สายรูปแบบ D6 ทุกสาย map tenant ถูก (ภายใน, ข้าม tenant, `authcode:2`); ไม่มี tenant 63 แถว = แถวยุค D1, tenant ทดสอบ 0999 และสาย denied ก่อนมี `<code>denied`
 - **denied ต่อ tenant:** สายที่ถูกปฏิเสธเดิมจบที่ `denied` ร่วม (`src` เลขเปล่า, `dst=denied` → ไม่รู้ tenant) → ตอนนี้ทุก `Goto` ไป `<code>denied` (Playback `ss-noservice`, Hangup 21) เป็นของ `calling:<code>` (prefix ที่ owned เพิ่ม `<code>denied`); tenant ที่ถูกระงับยังคง `<code>denied` ไว้ (state `suspended`) เพราะเบอร์ที่ปิดชี้ไปที่นั่น; `denied` ร่วมยังเขียนไว้สำหรับแถวเก่า. ใน CDR: `dst=<code>denied` → ผู้โทร = code นั้น (หรือจาก `src` `8<code>…` เมื่อโทรข้าม tenant ไปเบอร์ที่ปิด แล้ว code นั้นคือผู้รับ); เลขที่กดหายไป. node lab: reconcile เขียน calling ใหม่ 2 tenant แล้ว clean; `channel originate Local/10010812345678@from-opensips` → CDR `dst=1001denied`, call record = tenant 1001, denied
-- ยังไม่ทำ: AMI listener, registration snapshots, dashboard, alerts, `GET call-records` ใน API
+- ยังไม่ทำ: registration snapshots, dashboard, alerts, `GET call-records` ใน API
+
+### M7 (ส่วนที่สอง) — AMI listener (31 ต.ค. 2026, ยังไม่ commit)
+
+- `Infrastructure\Asterisk\AmiEventStream`: login ด้วย event mask (ผ่าน `AmiClient::login(…, $events)`) แล้วอ่านแบบ non-blocking (อ่านจนหมดทุกครั้ง ข้อมูลจึงไม่ค้างใน buffer ของ PHP ที่ `stream_select` มองไม่เห็น), `ping()` (ActionID `sip-manager-ping-<n>`), `close()` (Logoff ไม่รอคำตอบ); `AmiClient::encode()` ใช้ร่วมกัน
+- `CallRecords\Listener\CallEventListener` (`ami:listen {node?}` — ไม่ระบุ = ทุก node ที่มี Asterisk + endpoint `ami`): process เดียว ทุก node รอด้วย `stream_select`; อ่านรายชื่อ node ใหม่ทุก 60 วินาที (node ใหม่/ถูกลบ/credential เปลี่ยน = เชื่อมต่อใหม่); Ping เมื่อเงียบ 20 วินาที ไม่ตอบใน 10 วินาที = ตัดแล้วต่อใหม่; backoff 1, 2, 5, 10, 30, 60 วินาที; เก็บเฉพาะ `Newchannel, Newstate, DialBegin, DialEnd, BridgeEnter, BridgeLeave, Hold, Unhold, Hangup, UserEvent, Cdr, Queue*/Agent*` (ไม่เก็บ `Newexten`/`VarSet`); ส่งเป็นชุดทุก 1 วินาทีหรือ 200 event เข้า job `StoreCallEvents` (queue `events`); queue รับไม่ได้ = เก็บไว้ในหน่วยความจำไม่เกิน 10,000; SIGTERM/SIGINT = ส่งที่ค้าง + logoff (ต้องมี ext-pcntl)
+- **ห้ามสองตัวฟัง node เดียวกัน:** `ami_connections` (ต่อ node: `listener`, `heartbeat_at`, status `connecting/connected/disconnected/stopped`, `connected_at`, `disconnected_at`, `last_event_at`, `events_count`, `last_error`) — `AmiConnection::claim()` ได้ node เมื่อไม่มีใครถือหรือ heartbeat เก่ากว่า 90 วินาที; ตัวอื่นลองใหม่ทุก 60 วินาที
+- `call_events` (node, `session` ULID ต่อการเชื่อมต่อ, `sequence`, tenant, event, uniqueid, linkedid, channel, `fields` json ไม่มี Privilege, `occurred_at` = `Timestamp` ถ้ามี ไม่งั้นเวลาที่อ่าน); unique (node, session, sequence) + `insertOrIgnore` = job ที่ retry ไม่เพิ่มแถวซ้ำ; tenant จาก `Tenant` ของ UserEvent → 4 หลักแรกของ `Exten` → caller ID `8<code>…` → event ก่อนหน้าที่ linkedid เดียวกัน; Dial event ที่ไม่มีช่องสัญญาณผู้โทร (originate) ใช้ฟิลด์ `Dest*`; prune 30 วัน (`model:prune`)
+- AMI ไม่ส่ง event ย้อนหลังช่วงที่หลุด — CDR (`cdr:sync`) ยังเป็นบันทึกหลักของสาย
+- การ์ด node ใน `/admin/nodes`: "AMI events" connected / not running (heartbeat เก่ากว่า 90 วินาที) / ข้อผิดพลาดล่าสุด + จำนวน event
+- `php artisan dev` รัน `ami:listen` และ queue `provisioning,events,default`; production: supervisor 1 process `ami:listen` + worker ที่ฟัง queue `events`
+- node lab (30 ต.ค.): connected, Ping/Pong ทุก 20 วินาที; `channel originate Local/10010812345678@from-opensips` → 8 event (Newchannel ×2, DialBegin, Newstate ×2, DialEnd, Hangup ×2) tenant 1001 ทุกแถว
+- ข้อสังเกต: บน Windows (ไม่มี pcntl) การฆ่า process ทิ้งการถือ node ไว้ — ตัวใหม่รอ ~90 วินาทีก่อนรับต่อ
+- 286 tests, Larastan, vue-tsc, `vp check` ผ่าน
+- ยังไม่ทำ: นับ `AuthCodeFailed` ต่อ caller/tenant + แจ้งเตือน, alert "AMI listener หลุด", wallboard/dashboard จาก call events
+
+### D8 — Call pickup group (5 พ.ย. 2026, ยังไม่ commit)
+
+- ทำตาม D8: `PickupGroup` + `ManagePickupGroups` (สร้าง/แก้ด้วย `version`/ลบ/reapply, audit `pickup_group.*`, operation `pickup_group.created/updated/deleted`), `PickupGroupDependents` (hook ใน `ManageExtensions::delete` และ `ManageRingGroups`), `NumberCompiler::PICKUP_EXTEN = '*8'` + `pickupMark()`/`ringGroupPickupMark()`, `CallingCompiler::pickup()`
+- หน้า `/t/{slug}/pickup-groups` (รายการ + สร้าง, หน้าแก้, เลือกสมาชิกด้วย checkbox — extension ที่อยู่กลุ่มอื่นเลือกไม่ได้และแสดงชื่อกลุ่ม, สถานะบน PBX, Retry); เมนู "Pickup groups" ใน sidebar; ป้ายใน Operations
+- `PickupGroupTest` 6 tests (สร้าง + revision ที่ขอ, กลุ่มเดียวต่อ extension / สมาชิกต่าง tenant / ชื่อซ้ำ, compile ทั้งฝั่งดังและฝั่งรับรวม ring group, สมาชิกออก + stale version, ลบ extension และลบกลุ่มสุดท้าย, สิทธิ์ member = 403); telephony + provisioning 117 tests, Pint, vue-tsc, `vp check` ผ่าน
+- ยังไม่ทำ: ทดสอบบน node lab ด้วยโทรศัพท์ (201 โทรหา 202, 203 ในกลุ่มเดียวกันกด `*8`; ring group ที่มีสมาชิกในกลุ่ม), ยืนยันว่า node โหลด `app_directed_pickup`, pickup groups ใน API v1, directed pickup (`**<ext>`)
 
 ### ถัดไป
 
-✅ หน้า Operations → ✅ M6 → M7: ✅ CDR sync (โค้ด) → ✅ denied ต่อ tenant → ทดสอบ answered/busy/no answer/denied ด้วยโทรศัพท์จริง → AMI listener
+✅ หน้า Operations → ✅ M6 → M7: ✅ CDR sync (โค้ด) → ✅ denied ต่อ tenant → ✅ AMI listener (โค้ด + node lab) → ทดสอบ answered/busy/no answer/denied ด้วยโทรศัพท์จริง (ดูทั้ง CDR และ call events) → registration snapshots → alerts (AuthCodeFailed, listener หลุด, CDR sync หยุด) → dashboard

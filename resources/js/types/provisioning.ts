@@ -66,3 +66,16 @@ export type CdrSync = {
     last_count: number;
     last_error: string | null;
 };
+
+/** The AMI event listener's connection to a node. */
+export type AmiListener = {
+    status: 'connecting' | 'connected' | 'disconnected' | 'stopped';
+    /** A listener holds the node and was heard from in the last 90 seconds. */
+    alive: boolean;
+    heartbeat_at: string | null;
+    connected_at: string | null;
+    disconnected_at: string | null;
+    last_event_at: string | null;
+    events_count: number;
+    last_error: string | null;
+};

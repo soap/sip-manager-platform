@@ -6,6 +6,7 @@ use App\Modules\Nodes\Models\TenantPbxAssignment;
 use App\Modules\Telephony\Models\AuthorizationCode;
 use App\Modules\Telephony\Models\CallingProfile;
 use App\Modules\Telephony\Models\Extension;
+use App\Modules\Telephony\Models\PickupGroup;
 use App\Modules\Telephony\Models\RingGroup;
 use App\Modules\Tenancy\Models\ApiToken;
 use App\Modules\Tenancy\TenantContext;
@@ -42,6 +43,7 @@ class AppServiceProvider extends ServiceProvider
         Relation::morphMap([
             Extension::MORPH => Extension::class,
             RingGroup::MORPH => RingGroup::class,
+            PickupGroup::MORPH => PickupGroup::class,
             TenantPbxAssignment::MORPH => TenantPbxAssignment::class,
             CallingProfile::MORPH => CallingProfile::class,
             AuthorizationCode::MORPH => AuthorizationCode::class,
@@ -64,14 +66,15 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
-     * `php artisan dev` also works the provisioning queue and runs the scheduler, which relays the
-     * provisioning outbox every two seconds and syncs the nodes.
+     * `php artisan dev` also works the provisioning and events queues, runs the scheduler, which
+     * relays the provisioning outbox every two seconds and syncs the nodes, and listens to AMI.
      */
     protected function configureDevCommands(): void
     {
         DevCommands::artisan('serve --port=8080', 'server');
-        DevCommands::artisan('queue:listen --queue=provisioning,default --tries=1 --timeout=0', 'queue');
+        DevCommands::artisan('queue:listen --queue=provisioning,events,default --tries=1 --timeout=0', 'queue');
         DevCommands::artisan('schedule:work', 'scheduler');
+        DevCommands::artisan('ami:listen', 'ami');
     }
 
     /**

@@ -3,6 +3,7 @@
 use App\Modules\Telephony\Http\Controllers\AuthorizationCodeController;
 use App\Modules\Telephony\Http\Controllers\CallingPermissionController;
 use App\Modules\Telephony\Http\Controllers\ExtensionController;
+use App\Modules\Telephony\Http\Controllers\PickupGroupController;
 use App\Modules\Telephony\Http\Controllers\RingGroupController;
 use App\Modules\Tenancy\Http\Middleware\SetTenantContext;
 use Illuminate\Support\Facades\Route;
@@ -33,4 +34,10 @@ Route::middleware(['auth', 'verified', SetTenantContext::class])->prefix('t/{ten
     Route::patch('ring-groups/{ringGroup}', [RingGroupController::class, 'update'])->whereNumber('ringGroup')->name('ring-groups.update');
     Route::delete('ring-groups/{ringGroup}', [RingGroupController::class, 'destroy'])->whereNumber('ringGroup')->name('ring-groups.destroy');
     Route::post('ring-groups/{ringGroup}/reapply', [RingGroupController::class, 'reapply'])->whereNumber('ringGroup')->middleware('throttle:10,1')->name('ring-groups.reapply');
+    Route::get('pickup-groups', [PickupGroupController::class, 'index'])->name('pickup-groups.index');
+    Route::post('pickup-groups', [PickupGroupController::class, 'store'])->name('pickup-groups.store');
+    Route::get('pickup-groups/{pickupGroup}/edit', [PickupGroupController::class, 'edit'])->whereNumber('pickupGroup')->name('pickup-groups.edit');
+    Route::patch('pickup-groups/{pickupGroup}', [PickupGroupController::class, 'update'])->whereNumber('pickupGroup')->name('pickup-groups.update');
+    Route::delete('pickup-groups/{pickupGroup}', [PickupGroupController::class, 'destroy'])->whereNumber('pickupGroup')->name('pickup-groups.destroy');
+    Route::post('pickup-groups/{pickupGroup}/reapply', [PickupGroupController::class, 'reapply'])->whereNumber('pickupGroup')->middleware('throttle:10,1')->name('pickup-groups.reapply');
 });

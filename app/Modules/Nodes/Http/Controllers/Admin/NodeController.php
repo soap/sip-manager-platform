@@ -4,6 +4,7 @@ namespace App\Modules\Nodes\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Modules\CallRecords\Actions\SyncCallRecords;
+use App\Modules\CallRecords\Listener\CallEventListener;
 use App\Modules\Nodes\Actions\CheckNodeConnections;
 use App\Modules\Nodes\Actions\SyncNodes;
 use App\Modules\Nodes\Enums\AssignmentStatus;
@@ -34,7 +35,7 @@ class NodeController extends Controller
                 ->map(fn (Tenant $tenant): array => ['value' => $tenant->id, 'label' => $tenant->name]),
             'assignmentStatuses' => AssignmentStatus::options(),
             'nodes' => PbxNode::query()
-                ->with(['secrets', 'latestReconcileRun', 'cdrCursor', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
+                ->with(['secrets', 'latestReconcileRun', 'cdrCursor', 'amiConnection', 'assignments' => fn ($query) => $query->with(['tenant:id,name,slug,code,sip_domain'])->withCount('extensions')])
                 ->orderByRaw('removed_at is not null')
                 ->orderBy('name')
                 ->get()
@@ -46,8 +47,10 @@ class NodeController extends Controller
                     'environment' => $node->environment,
                     'status' => $node->status,
                     'region' => $node->region,
+                    'os' => $node->os,
                     'management_address' => $node->addresses['management'] ?? null,
                     'opensips' => $node->services['opensips'] ?? null,
+                    'rtpengine' => $node->services['rtpengine'] ?? null,
                     'asterisk' => $node->services['asterisk'] ?? null,
                     'endpoints' => array_keys($node->endpoints),
                     'credentials' => array_keys($node->credentials()),
@@ -63,6 +66,16 @@ class NodeController extends Controller
                         'last_success_at' => $node->cdrCursor?->last_success_at?->toIso8601String(),
                         'last_count' => $node->cdrCursor->last_count ?? 0,
                         'last_error' => $node->cdrCursor?->last_error,
+                    ],
+                    'ami_listener' => ! CallEventListener::canListen($node) ? null : [
+                        'status' => $node->amiConnection->status->value ?? 'stopped',
+                        'alive' => $node->amiConnection?->isAlive() ?? false,
+                        'heartbeat_at' => $node->amiConnection?->heartbeat_at?->toIso8601String(),
+                        'connected_at' => $node->amiConnection?->connected_at?->toIso8601String(),
+                        'disconnected_at' => $node->amiConnection?->disconnected_at?->toIso8601String(),
+                        'last_event_at' => $node->amiConnection?->last_event_at?->toIso8601String(),
+                        'events_count' => $node->amiConnection->events_count ?? 0,
+                        'last_error' => $node->amiConnection?->last_error,
                     ],
                     'reconcile' => $node->latestReconcileRun === null ? null : [
                         'status' => $node->latestReconcileRun->status->value,
